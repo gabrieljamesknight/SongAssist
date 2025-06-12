@@ -1,40 +1,39 @@
-[comment]: # (You may find the following markdown cheat sheet useful: https://www.markdownguide.org/cheat-sheet/. You may also consider using an online Markdown editor such as StackEdit or makeareadme.) 
+Project title: SongAssist: A Comprehensive Song Practice App for Musicians
 
-## Project title: *[Insert your project title here]*
+Student name: Gabriel Knight 
+Student email: gk247@student.le.ac.uk
 
-### Student name: *[Insert your name here]*
+Project description:
+When a musician is learning a song, it is often necessary to manipulate audio of the track to gain a deeper 
+understanding of its various intricacies. An existing technology that helps with this is audio stem-splitting 
+which allows for isolation of each instrument without access to the multi-tracks of the song. While leading applications
+offering stem-splitting functionality can be valuable for practicing and learning, they are mostly 
+DAWs (Digital Audio Workstation) and aren’t geared specifically towards practice and simplicity. SongAssist is a 
+web application that aims to solve this problem by providing extensive stem-separation features that allow for
+stem-splitting of any MP3 file uploaded by the user and manipulation of these stems through speed adjustment and
+mixing of each split-stem; the application aims to be accessible to any musician with limited technical knowledge
+being sufficient.
 
-### Student email: *[Insert your university email address here]*
+In order to achieve all of this functionality, the project will involve web app development, user-interface design,
+AI-powered stem-splitting, audio file manipulation and local data storage. 
 
-### Project description: 
-*[Add your project description here, these will typically be around 100-150 words long]*
+________________________________________
 
-### List of requirements (objectives): 
-
-[comment]: # (You can add as many additional bullet points as necessary by adding an additional hyphon symbol '-' at the end of each list) 
-
+List of requirements (objectives):
 Essential:
-- [Essential requirement 1]
-- [Essential requirement 2]
-- [Essential requirement 3]
-- [Essential requirement *n*]
+•	Provide AI-assisted stem-splitting instrument isolation functionality.
+•	Ensure the web application can play MP3 files from the user's device.
+•	Implement a feature to add and delete bookmarks at specific timestamps within a song.
+•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.
 
 Desirable:
-- [Desirable requirement 1]
-- [Desirable requirement 2]
-- [Desirable requirement 3]
-- [Desirable requirement *n*]
+•	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.
+•	Enable users to create, edit, and manage multiple playlists of songs they are learning.
+•	Include an interactive stem mixer.
 
 Optional:
-- [Optional requirement 1]
-- [Optional requirement 2]
-- [Optional requirement 3]
-- [Optional requirement *n*]
+•	Develop a feature to allow users to pitch shift their MP3 files.
+•	Allow users to name or label their bookmarks for easier identification.
+•	Implement a waveform display of the audio track to allow for more precise bookmark placement.
+•	Develop a customizable user-interface.
 
-
-## Information about this repository
-This is the repository that you are going to use **individually** for developing your project. Please use the resources provided in the module to learn about **plagiarism** and how plagiarism awareness can foster your learning.
-
-Regarding the use of this repository, once a feature (or part of it) is developed and **working** or parts of your system are integrated and **working**, define a commit and push it to the remote repository. You may find yourself making a commit after a productive hour of work (or even after 20 minutes!), for example. Choose commit message wisely and be concise.
-
-Please choose the structure of the contents of this repository that suits the needs of your project but do indicate in this file where the main software artefacts are located.
