@@ -14,11 +14,12 @@ Additionally, many popular applications in this field aren’t developed specifi
 be a somewhat compromised experience in attempting to cater to all musicians.  
   
 SongAssist is a web application that aims to solve this problem by providing extensive stem-separation features that allow for  
-stem-splitting of any MP3 file uploaded by the user and AI-assisted tips on emulating the guitar playing in the song along with  
-generation of musical notation where possible. The application aims to be accessible to any guitarist, even with limited technical  
-knowledge SongAssist should be straightforward to use without any confusion.  
+stem-splitting of any MP3 file uploaded by the user in which the user can choose to listen to just the guitar or playback of the song
+without guitar in order to play along. On top of stem-splitting, SongAssist also presents AI-assisted tips on emulating the guitar 
+playing in the song along with generation of musical notation where possible. The application aims to be accessible to any guitarist,
+even with limited technical knowledge SongAssist should be straightforward to use without any confusion.  
   
-In order to achieve all of this functionality, the project will involve web app development, user-interface design,
+In order to achieve all of this functionality, the project will involve web app development, user-interface design,  
 AI-powered stem-splitting, audio file manipulation and local data storage.  
   
 ________________________________________  
@@ -26,18 +27,18 @@ ________________________________________
 List of requirements (objectives):   
 Essential:  
 •	Provide AI-assisted stem-splitting instrument isolation functionality.  
-•	Ensure the web application can play MP3 files from the user's device.  
 •	Implement a feature to add and delete bookmarks at specific timestamps within a song.  
-•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
-
+•   Provide an AI assistant that gives advice on playing the song.  
+•   Develop functionality for generating guitar tablature based on the MP3 file provided.  
+  
 Desirable:  
 •	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.  
 •	Enable users to create, edit, and manage multiple playlists of songs they are learning.  
 •	Include an interactive stem mixer.  
-•   Provide an AI assistant that gives insight on the song where possible.
-
+•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
+  
 Optional:  
-•	Develop a feature to allow users to pitch shift their MP3 files.  
+•	Develop a feature to allow users to pitch shift their MP3 files without affecting playback speed.  
 •	Allow users to name or label their bookmarks for easier identification.  
 •	Implement a waveform display of the audio track to allow for more precise bookmark placement.  
 •	Develop a customizable user-interface.  
