@@ -26,16 +26,17 @@ ________________________________________
   
 List of requirements (objectives):   
 Essential:  
-•	Provide AI-assisted stem-splitting instrument isolation functionality.  
-•	Implement a feature to add and delete bookmarks at specific timestamps within a song.  
+•	Implement AI-assisted stem-splitting instrument isolation functionality.  
 •   Provide an AI assistant that gives advice on playing the song.  
-•   Develop functionality for generating guitar tablature based on the MP3 file provided.  
+•   Develop functionality for generating guitar tablature based on the MP3 file provided. 
+•   Provide a straightforward user-interface.
   
 Desirable:  
 •	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.  
 •	Enable users to create, edit, and manage multiple playlists of songs they are learning.  
 •	Include an interactive stem mixer.  
-•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
+•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch. 
+•	Implement a feature to add and delete bookmarks at specific timestamps within a song.   
   
 Optional:  
 •	Develop a feature to allow users to pitch shift their MP3 files without affecting playback speed.  
