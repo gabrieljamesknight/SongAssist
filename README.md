@@ -28,8 +28,8 @@ List of requirements (objectives):
 Essential:  
 •	Implement AI-assisted stem-splitting instrument isolation functionality.  
 •   Provide an AI assistant that gives advice on playing the song.  
-•   Develop functionality for generating guitar tablature based on the MP3 file provided. 
-•   Provide a straightforward user-interface.
+•   Develop functionality for generating guitar tablature based on the MP3 file provided.  
+•   Provide a straightforward user-interface.  
   
 Desirable:  
 •	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.  
