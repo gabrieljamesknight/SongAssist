@@ -35,7 +35,7 @@ Desirable:
 •	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.  
 •	Enable users to create, edit, and manage multiple playlists of songs they are learning.  
 •	Include an interactive stem mixer.  
-•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch. 
+•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
 •	Implement a feature to add and delete bookmarks at specific timestamps within a song.   
   
 Optional:  
