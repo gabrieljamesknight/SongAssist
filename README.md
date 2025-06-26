@@ -31,8 +31,7 @@ Essential:
 •   Develop functionality for generating guitar tablature based on the MP3 file provided.  
 •   Provide a straightforward user-interface.  
   
-Desirable:  
-•	Create on-screen buttons to instantly rewind or fast-forward to the nearest bookmark.  
+Desirable:   
 •	Enable users to create, edit, and manage multiple playlists of songs they are learning.  
 •	Include an interactive stem mixer.  
 •	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
