@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Song } from '../types';
 import { PlayIcon, PauseIcon, RewindIcon, FastForwardIcon, BookmarkIcon } from './Icons';
@@ -101,13 +100,49 @@ const Player: React.FC<PlayerProps> = ({
       </div>
 
       <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pt-4">
-        <div className="w-full sm:w-1/2">
-            <label htmlFor="speed" className="block mb-2 text-sm font-medium text-gray-300">Playback Speed: {playbackSpeed.toFixed(2)}x</label>
-            <input id="speed" type="range" min="0.5" max="2" step="0.05" value={playbackSpeed} onChange={e => onSpeedChange(Number(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"/>
+        <div className="w-full sm:w-1/2 flex flex-col items-center space-y-2">
+            <span className="text-sm font-medium text-gray-300">Playback Speed</span>
+            <div className="flex items-center space-x-3">
+                <button
+                    onClick={() => onSpeedChange(Math.max(0.5, Number((playbackSpeed - 0.1).toFixed(2))))}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Decrease playback speed"
+                    disabled={playbackSpeed <= 0.5}
+                >
+                    -
+                </button>
+                <span className="text-lg font-mono w-24 text-center text-white tabular-nums">{playbackSpeed.toFixed(2)}x</span>
+                <button
+                    onClick={() => onSpeedChange(Math.min(2.0, Number((playbackSpeed + 0.1).toFixed(2))))}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Increase playback speed"
+                    disabled={playbackSpeed >= 2.0}
+                >
+                    +
+                </button>
+            </div>
         </div>
-        <div className="w-full sm:w-1/2">
-             <label htmlFor="pitch" className="block mb-2 text-sm font-medium text-gray-300">Pitch Shift: {pitchShift >= 0 ? '+' : ''}{pitchShift} semitones</label>
-            <input id="pitch" type="range" min="-12" max="12" step="1" value={pitchShift} onChange={e => onPitchChange(Number(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"/>
+        <div className="w-full sm:w-1/2 flex flex-col items-center space-y-2">
+            <span className="text-sm font-medium text-gray-300">Pitch Shift</span>
+             <div className="flex items-center space-x-3">
+                <button
+                    onClick={() => onPitchChange(Math.max(-12, pitchShift - 1))}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Decrease pitch"
+                    disabled={pitchShift <= -12}
+                >
+                    -
+                </button>
+                <span className="text-lg font-mono w-24 text-center text-white tabular-nums">{pitchShift >= 0 ? '+' : ''}{pitchShift} semi</span>
+                <button
+                    onClick={() => onPitchChange(Math.min(12, pitchShift + 1))}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Increase pitch"
+                    disabled={pitchShift >= 12}
+                >
+                    +
+                </button>
+            </div>
         </div>
       </div>
       
