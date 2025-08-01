@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 const API_KEY = process.env.API_KEY;
@@ -26,6 +25,30 @@ const parseJsonResponse = <T,>(text: string): T | null => {
     }
 };
 
+export const getInitialSongAnalysis = async (songTitle: string, artist: string | undefined): Promise<string> => {
+    if (!ai) return "API Key not configured. Please set the API_KEY environment variable.";
+    if (!songTitle) return "UNKNOWN_SONG";
+    
+    try {
+        const songIdentifier = artist ? `"${songTitle}" by ${artist}` : `"${songTitle}"`;
+        const prompt = `As an expert guitar coach, provide a brief, welcoming analysis for a musician starting to learn the song ${songIdentifier}. Give 1-2 general tips about the guitar part (e.g., key chords, strumming feel, or a famous riff). Keep it encouraging and concise, and address the user directly. If you are not confident you know the correct song, respond with ONLY the text "UNKNOWN_SONG".`;
+        
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                systemInstruction: "You are a helpful and encouraging guitar teacher for musicians learning a new song. Your tone is friendly and supportive.",
+            }
+        });
+
+        return response.text ?? "UNKNOWN_SONG";
+    } catch (error) {
+        console.error("Error getting initial song analysis:", error);
+        return "UNKNOWN_SONG";
+    }
+};
+
+
 export const getPlayingAdvice = async (songTitle: string, artist: string | undefined, userQuery: string): Promise<string> => {
     if (!ai) return "API Key not configured. Please set the API_KEY environment variable.";
     try {
@@ -33,7 +56,7 @@ export const getPlayingAdvice = async (songTitle: string, artist: string | undef
         const prompt = `As an expert guitar coach, provide advice for playing the song ${songIdentifier}. The user is asking: "${userQuery}". Keep your advice concise, practical, and focused on guitar techniques like chords, strumming patterns, and difficult sections.`;
         
         const response: GenerateContentResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-preview-04-17',
+            model: 'gemini-2.5-flash',
             contents: prompt,
             config: {
                 systemInstruction: "You are a helpful and encouraging guitar teacher for musicians learning a new song.",
@@ -54,7 +77,7 @@ export const generateTabs = async (songTitle: string, artist: string | undefined
         const prompt = `Generate guitar tablature for the song ${songIdentifier}. Provide it in a clear, plain text format. If you can provide chords and structure (e.g., Verse, Chorus), please do. If you cannot find tabs, say so and explain why.`;
         
         const response: GenerateContentResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-preview-04-17',
+            model: 'gemini-2.5-flash',
             contents: prompt,
              config: {
                 systemInstruction: "You are a musical transcriber that specializes in creating accurate guitar tablature.",

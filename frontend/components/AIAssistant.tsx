@@ -1,17 +1,17 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { getPlayingAdvice } from '../services/geminiService';
 import { ChatMessage, Song } from '../types';
 import { BotIcon } from './Icons';
+import { MarkdownText } from './MarkdownRenderer';
 
 interface AIAssistantProps {
   song: Song | null;
+  messages: ChatMessage[];
+  isLoading: boolean;
+  onSendMessage: (query: string) => void;
 }
 
-const AIAssistant: React.FC<AIAssistantProps> = ({ song }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export const AIAssistant: React.FC<AIAssistantProps> = ({ song, messages, isLoading, onSendMessage }) => {
   const [query, setQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -20,19 +20,11 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ song }) => {
 
   useEffect(scrollToBottom, [messages]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || isLoading || !song) return;
-
-    const userMessage: ChatMessage = { role: 'user', content: query };
-    setMessages(prev => [...prev, userMessage]);
+    onSendMessage(query);
     setQuery('');
-    setIsLoading(true);
-
-    const advice = await getPlayingAdvice(song.name, song.artist, query);
-    const modelMessage: ChatMessage = { role: 'model', content: advice };
-    setMessages(prev => [...prev, modelMessage]);
-    setIsLoading(false);
   };
 
   if (!song) {
@@ -42,20 +34,35 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ song }) => {
       </div>
     )
   }
+  
+  const showInitialLoading = isLoading && messages.length === 0;
+  const showTypingIndicator = isLoading && messages.length > 0;
 
   return (
     <div className="h-full flex flex-col">
       <h3 className="text-xl font-bold text-white mb-4 flex-shrink-0">AI Assistant</h3>
       <div className="flex-grow overflow-y-auto pr-2 space-y-4">
-        {messages.map((msg, index) => (
-          <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-            {msg.role === 'model' && <div className="w-8 h-8 rounded-full bg-teal-500 flex items-center justify-center flex-shrink-0 mt-1"><BotIcon className="w-5 h-5 text-white"/></div>}
-            <div className={`p-3 rounded-lg max-w-sm md:max-w-md lg:max-w-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700'}`}>
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+        {showInitialLoading ? (
+            <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                    <div className="w-10 h-10 border-4 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <p className="mt-4 text-gray-400">Analyzing song...</p>
+                </div>
             </div>
-          </div>
-        ))}
-        {isLoading && (
+        ) : (
+            messages.map((msg, index) => (
+                <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                    {msg.role === 'model' && <div className="w-8 h-8 rounded-full bg-teal-500 flex items-center justify-center flex-shrink-0 mt-1"><BotIcon className="w-5 h-5 text-white"/></div>}
+                    <div className={`p-3 rounded-lg max-w-sm md:max-w-md lg:max-w-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700'}`}>
+                        <div className="whitespace-pre-wrap">
+                            {msg.role === 'model' ? <MarkdownText text={msg.content} /> : msg.content}
+                        </div>
+                    </div>
+                </div>
+            ))
+        )}
+
+        {showTypingIndicator && (
             <div className="flex items-start gap-3">
                  <div className="w-8 h-8 rounded-full bg-teal-500 flex items-center justify-center flex-shrink-0 mt-1"><BotIcon className="w-5 h-5 text-white"/></div>
                  <div className="p-3 rounded-lg bg-gray-700">
@@ -91,5 +98,3 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ song }) => {
     </div>
   );
 };
-
-export default AIAssistant;

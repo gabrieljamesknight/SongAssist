@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
 import { generateTabs } from '../services/geminiService';
 import { Song } from '../types';
+import { MarkdownText } from './MarkdownRenderer';
 
 interface TabGeneratorProps {
   song: Song | null;
@@ -44,13 +44,13 @@ const TabGenerator: React.FC<TabGeneratorProps> = ({ song }) => {
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
                 <div className="w-12 h-12 border-4 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="mt-4 text-gray-400">Generating tabs for "{song.name}"{song.artist ? ` by ${song.artist}` : ''}...</p>
+                <p className="mt-4 text-gray-400">Generating tabs for "{song.name}"...</p>
             </div>
           </div>
         ) : error ? (
           <div className="text-red-400 p-4 bg-red-900/50 rounded-lg">{error}</div>
         ) : tabs ? (
-          <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{tabs}</pre>
+          <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono"><MarkdownText text={tabs} /></pre>
         ) : (
           <div className="flex items-center justify-center h-full">
              <p className="text-gray-500">Click the button below to generate tabs.</p>
@@ -62,7 +62,7 @@ const TabGenerator: React.FC<TabGeneratorProps> = ({ song }) => {
         disabled={isLoading}
         className="w-full mt-4 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
       >
-        {isLoading ? 'Generating...' : `Generate Tabs for "${song.name}"${song.artist ? ` by ${song.artist}`: ''}`}
+        {isLoading ? 'Generating...' : `Generate Tabs for "${song.name}"`}
       </button>
     </div>
   );
