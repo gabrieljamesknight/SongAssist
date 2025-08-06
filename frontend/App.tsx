@@ -8,7 +8,7 @@ import {AIAssistant} from './components/AIAssistant';
 import TabGenerator from './components/TabGenerator';
 import BookmarkList from './components/BookmarkList';
 import { BotIcon, FileTextIcon, BookmarkIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, generateTabs } from './services/geminiService';
 
 
 function usePrevious<T>(value: T): T | undefined {
@@ -28,7 +28,7 @@ const App: React.FC = () => {
   const [pitchShift, setPitchShift] = useState(0);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [stemVolumes, setStemVolumes] = useState<Record<Stem, number>>(
-    ALL_STEMS.reduce((acc, stem) => ({ ...acc, [stem]: 100 }), {} as Record<Stem, number>)
+  ALL_STEMS.reduce((acc, stem) => ({ ...acc, [stem]: 100 }), {} as Record<Stem, number>)
   );
   const [activeView, setActiveView] = useState<ActiveView>('assistant');
   const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
@@ -36,6 +36,12 @@ const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
   const [debounceTimer, setDebounceTimer] = useState<number | null>(null);
+  const [appError, setAppError] = useState<string | null>(null);
+
+  const [tabs, setTabs] = useState<string | null>(null);
+  const [isTabGeneratorLoading, setIsTabGeneratorLoading] = useState(false);
+  const [tabGeneratorError, setTabGeneratorError] = useState<string | null>(null);
+
 
   // Web Audio API References
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -50,6 +56,7 @@ const App: React.FC = () => {
   // The context is only created on a direct user gesture.
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
+      if (appError) return null;
       try {
         const context = new (window.AudioContext || (window as any).webkitAudioContext)();
         audioContextRef.current = context;
@@ -60,11 +67,12 @@ const App: React.FC = () => {
         gain.gain.value = stemVolumes.backingTrack / 100;
       } catch (e) {
         console.error("Web Audio API is not supported in this browser", e);
-        // Here you could show an error to the user
+        setAppError("This browser does not support the Web Audio API, which is required for this application to function. Please try a modern browser like Chrome, Firefox, or Safari.");
+        return null;
       }
     }
     return audioContextRef.current;
-  }, [stemVolumes.backingTrack]);
+  }, [stemVolumes.backingTrack, appError]);
 
   // This effect ensures that if an AudioContext was created, it gets closed on unmount.
   useEffect(() => {
@@ -206,6 +214,8 @@ const App: React.FC = () => {
     setIsPlaying(false);
     setBookmarks([]);
     setChatMessages([]);
+    setTabs(null);
+    setTabGeneratorError(null);
     
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -319,23 +329,22 @@ const App: React.FC = () => {
     setIsAssistantLoading(false);
   }, [song, isAssistantLoading]);
 
-  const renderActiveView = () => {
-    switch (activeView) {
-      case 'assistant':
-        return <AIAssistant 
-                  song={song} 
-                  messages={chatMessages} 
-                  isLoading={isAssistantLoading} 
-                  onSendMessage={handleSendMessage} 
-                />;
-      case 'tabs':
-        return <TabGenerator song={song} />;
-      case 'bookmarks':
-        return <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={handleSeek}/>;
-      default:
-        return null;
+  const handleGenerateTabs = useCallback(async () => {
+    if (!song) return;
+    setIsTabGeneratorLoading(true);
+    setTabGeneratorError(null);
+    setTabs(null);
+
+    const result = await generateTabs(song.name, song.artist);
+    if (result.startsWith('Sorry')) {
+        setTabGeneratorError(result);
+    } else {
+        setTabs(result);
     }
-  };
+    
+    setIsTabGeneratorLoading(false);
+  }, [song]);
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 p-4 sm:p-6 lg:p-8">
@@ -393,8 +402,32 @@ const App: React.FC = () => {
                         </button>
                     </nav>
                 </div>
-                <div className="flex-grow overflow-hidden">
-                    {renderActiveView()}
+                <div className="flex-grow overflow-hidden relative">
+                    <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'assistant' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        <AIAssistant 
+                            song={song} 
+                            messages={chatMessages} 
+                            isLoading={isAssistantLoading} 
+                            onSendMessage={handleSendMessage} 
+                        />
+                    </div>
+                    <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'tabs' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        <TabGenerator
+                            song={song}
+                            tabs={tabs}
+                            isLoading={isTabGeneratorLoading}
+                            error={tabGeneratorError}
+                            onGenerateTabs={handleGenerateTabs}
+                        />
+                    </div>
+                     <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'bookmarks' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        <BookmarkList 
+                            bookmarks={bookmarks} 
+                            onDeleteBookmark={handleDeleteBookmark} 
+                            onUpdateBookmarkLabel={handleUpdateBookmarkLabel} 
+                            onGoToBookmark={handleSeek}
+                        />
+                    </div>
                 </div>
             </div>
           </div>

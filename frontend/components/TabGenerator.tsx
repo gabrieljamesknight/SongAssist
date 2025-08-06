@@ -1,31 +1,20 @@
-import React, { useState } from 'react';
-import { generateTabs } from '../services/geminiService';
+import React from 'react';
 import { Song } from '../types';
 import { MarkdownText } from './MarkdownRenderer';
 
 interface TabGeneratorProps {
   song: Song | null;
+  tabs: string | null;
+  isLoading: boolean;
+  error: string | null;
+  onGenerateTabs: () => void;
 }
 
-const TabGenerator: React.FC<TabGeneratorProps> = ({ song }) => {
-  const [tabs, setTabs] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const TabGenerator: React.FC<TabGeneratorProps> = ({ song, tabs, isLoading, error, onGenerateTabs }) => {
 
-  const handleGenerateTabs = async () => {
+  const handleGenerateTabs = () => {
     if (!song) return;
-    setIsLoading(true);
-    setError(null);
-    setTabs(null);
-
-    const result = await generateTabs(song.name, song.artist);
-    if (result.startsWith('Sorry')) {
-        setError(result);
-    } else {
-        setTabs(result);
-    }
-    
-    setIsLoading(false);
+    onGenerateTabs();
   };
 
   if (!song) {
