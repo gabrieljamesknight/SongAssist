@@ -1,0 +1,25 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node.js dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# VSCode editor configuration
+.vscode/
+
+# Operating System generated files
+.DS_Store
+Thumbs.db
+
+# Generated Audio
+backend/separated_audio/htdemucs_6s/
+backend/temp_uploads/

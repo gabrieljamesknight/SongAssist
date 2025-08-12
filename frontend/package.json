@@ -1,0 +1,28 @@
+{
+  "name": "songassist:-a-comprehensive-song-practice-app-for-musicians",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "^1.8.0",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "lucide-react": "^0.536.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-dropzone": "^14.3.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "SongAssist: A Comprehensive Song Practice App for Musicians",
+  "description": "An application for guitarists to practice songs with features like stem-splitting, AI-powered advice and automatic tablature generation. You can upload an MP3 to get started.",
+  "requestFramePermissions": []
+}
