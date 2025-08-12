@@ -22,3 +22,4 @@ Thumbs.db
 
 # Generated Audio
 backend/separated_audio/htdemucs_6s/
+backend/temp_uploads/

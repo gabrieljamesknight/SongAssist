@@ -14,7 +14,7 @@ export type AudioPlayerControls = {
     pause: () => void;
     seek: (time: number) => void;
     setStemVolumes: React.Dispatch<React.SetStateAction<Record<Stem, number>>>;
-    setPlaybackSpeed: React.Dispatch<React.SetStateAction<number>>;
+    setPlaybackSpeed: (speed: number | ((prevSpeed: number) => number)) => void;
     setSong: React.Dispatch<React.SetStateAction<Song | null>>;
 };
 
@@ -23,7 +23,7 @@ export const useAudioPlayer = (): AudioPlayerControls => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [stemVolumes, setStemVolumes] = useState<Record<Stem, number>>({ guitar: 100, backingTrack: 100 });
-    const [playbackSpeed, setPlaybackSpeed] = useState(1);
+    const [playbackSpeed, setPlaybackSpeedState] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -36,15 +36,15 @@ export const useAudioPlayer = (): AudioPlayerControls => {
     // Ref to hold playback state, used to stabilize callback functions
     const playbackStateRef = useRef({
         isPlaying: false,
-        pausedAt: 0,
+        pausedAt: 0, 
         startedAt: 0,
-        playbackSpeed: 1,
+        currentSpeed: 1,
     });
 
     // Effect to keep the state ref synchronized with the latest state values
     useEffect(() => {
         playbackStateRef.current.isPlaying = isPlaying;
-        playbackStateRef.current.playbackSpeed = playbackSpeed;
+        playbackStateRef.current.currentSpeed = playbackSpeed;
     }, [isPlaying, playbackSpeed]);
 
     const stopPlayback = useCallback(() => {
@@ -80,30 +80,23 @@ export const useAudioPlayer = (): AudioPlayerControls => {
 
     const play = useCallback(async () => {
         const context = initAudioContext();
-        if (!context) return;
+        if (!context || !buffersRef.current.guitar || !buffersRef.current.backingTrack) return;
         
         if (context.state === 'suspended') await context.resume();
         
-        const guitarBuffer = buffersRef.current.guitar;
-        const backingBuffer = buffersRef.current.backingTrack;
-        const guitarGain = gainsRef.current.guitar;
-        const backingGain = gainsRef.current.backingTrack;
-
-        if (!guitarBuffer || !backingBuffer || !guitarGain || !backingGain) return;
-
         stopPlayback();
 
         const createAndStartSource = (buffer: AudioBuffer, gainNode: GainNode): AudioBufferSourceNode => {
             const source = context.createBufferSource();
             source.buffer = buffer;
-            source.playbackRate.value = playbackStateRef.current.playbackSpeed;
+            source.playbackRate.value = playbackStateRef.current.currentSpeed;
             source.connect(gainNode);
             source.start(0, Math.max(0, playbackStateRef.current.pausedAt));
             return source;
         };
 
-        sourcesRef.current.guitar = createAndStartSource(guitarBuffer, guitarGain);
-        sourcesRef.current.backingTrack = createAndStartSource(backingBuffer, backingGain);
+        sourcesRef.current.guitar = createAndStartSource(buffersRef.current.guitar, gainsRef.current.guitar!);
+        sourcesRef.current.backingTrack = createAndStartSource(buffersRef.current.backingTrack, gainsRef.current.backingTrack!);
 
         sourcesRef.current.guitar.onended = () => {
             if (playbackStateRef.current.isPlaying) {
@@ -113,7 +106,7 @@ export const useAudioPlayer = (): AudioPlayerControls => {
             }
         };
 
-        playbackStateRef.current.startedAt = context.currentTime - playbackStateRef.current.pausedAt / playbackStateRef.current.playbackSpeed;
+        playbackStateRef.current.startedAt = context.currentTime;
         setIsPlaying(true);
     }, [initAudioContext, stopPlayback]);
 
@@ -121,8 +114,8 @@ export const useAudioPlayer = (): AudioPlayerControls => {
         const context = audioContextRef.current;
         if (!context || !playbackStateRef.current.isPlaying) return;
 
-        const elapsedSinceStart = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.playbackSpeed;
-        playbackStateRef.current.pausedAt = elapsedSinceStart;
+        const elapsedSinceStart = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
+        playbackStateRef.current.pausedAt += elapsedSinceStart;
         
         stopPlayback();
         setIsPlaying(false);
@@ -131,12 +124,35 @@ export const useAudioPlayer = (): AudioPlayerControls => {
     const seek = useCallback((time: number) => {
         if (!song) return;
         const newTime = Math.max(0, Math.min(time, song.duration));
+        
         playbackStateRef.current.pausedAt = newTime;
         setCurrentTime(newTime);
+
+        // If it was playing, restart playback from new position
         if (playbackStateRef.current.isPlaying) {
             play();
         }
     }, [song, play]);
+
+    const setPlaybackSpeed = useCallback((speed: number | ((prevSpeed: number) => number)) => {
+        const context = audioContextRef.current;
+        const newSpeed = typeof speed === 'function' ? speed(playbackStateRef.current.currentSpeed) : speed;
+
+        if (playbackStateRef.current.isPlaying && context) {
+            const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
+            playbackStateRef.current.pausedAt += elapsed;
+            playbackStateRef.current.startedAt = context.currentTime;
+        }
+
+        Object.values(sourcesRef.current).forEach(source => {
+            if (source) {
+                source.playbackRate.value = newSpeed;
+            }
+        });
+
+        setPlaybackSpeedState(newSpeed);
+
+    }, []);
 
     const load = useCallback(async (stemUrls: Record<string, string>, songDetails: { name: string, artist: string }) => {
         setIsLoading(true);
@@ -146,6 +162,7 @@ export const useAudioPlayer = (): AudioPlayerControls => {
             pause();
         }
         setCurrentTime(0);
+        setPlaybackSpeedState(1);
         playbackStateRef.current.pausedAt = 0;
 
         const decodingContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -174,6 +191,7 @@ export const useAudioPlayer = (): AudioPlayerControls => {
         }
     }, [pause, initAudioContext]);
 
+    // Effect for updating stem volumes
     useEffect(() => {
         const context = audioContextRef.current;
         const guitarGain = gainsRef.current.guitar;
@@ -185,26 +203,51 @@ export const useAudioPlayer = (): AudioPlayerControls => {
         }
     }, [stemVolumes]);
 
+    // Effect for updating the UI timer
     useEffect(() => {
         let animationFrameId: number;
         const update = () => {
             const context = audioContextRef.current;
-            if (isPlaying && context && song?.duration) {
-                const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackSpeed;
-                if (elapsed < song.duration) {
-                    setCurrentTime(elapsed);
+            if (playbackStateRef.current.isPlaying && context && song?.duration) {
+                // Time elapsed since last play/seek/speed-change, adjusted for current speed
+                const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
+                // Total time is the time before this segment + time elapsed in this segment
+                const newCurrentTime = playbackStateRef.current.pausedAt + elapsed;
+
+                if (newCurrentTime < song.duration) {
+                    setCurrentTime(newCurrentTime);
                 } else {
+                    // Song finished
                     setCurrentTime(song.duration);
-                    pause();
+                    setIsPlaying(false);
+                    stopPlayback();
+                    playbackStateRef.current.pausedAt = 0;
                 }
             }
             animationFrameId = requestAnimationFrame(update);
         };
+
         if (isPlaying) {
             animationFrameId = requestAnimationFrame(update);
         }
+        
         return () => cancelAnimationFrame(animationFrameId);
-    }, [isPlaying, song?.duration, playbackSpeed, pause]);
+    }, [isPlaying, song?.duration, stopPlayback]);
 
-    return { song, isPlaying, currentTime, isLoading, error, stemVolumes, playbackSpeed, load, play, pause, seek, setStemVolumes, setPlaybackSpeed, setSong };
+    return { 
+        song, 
+        isPlaying, 
+        currentTime, 
+        isLoading, 
+        error, 
+        stemVolumes, 
+        playbackSpeed, 
+        load, 
+        play, 
+        pause, 
+        seek, 
+        setStemVolumes, 
+        setPlaybackSpeed,
+        setSong 
+    };
 };
