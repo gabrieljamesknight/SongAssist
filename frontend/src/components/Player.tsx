@@ -1,4 +1,4 @@
-import type { FC } from 'react';
+import { FC, memo } from 'react';
 import { Song } from '../types';
 import { PlayIcon, PauseIcon, RewindIcon, FastForwardIcon, BookmarkIcon } from './Icons';
 
@@ -154,4 +154,4 @@ const Player: React.FC<PlayerProps> = ({
   );
 };
 
-export default Player;
+export default memo(Player);
