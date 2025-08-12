@@ -7,11 +7,9 @@ interface PlayerProps {
   isPlaying: boolean;
   currentTime: number;
   playbackSpeed: number;
-  pitchShift: number;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onSpeedChange: (speed: number) => void;
-  onPitchChange: (pitch: number) => void;
   onAddBookmark: () => void;
   onSongNameChange: (name: string) => void;
   onArtistNameChange: (artist: string) => void;
@@ -43,11 +41,9 @@ const Player: React.FC<PlayerProps> = ({
   isPlaying,
   currentTime,
   playbackSpeed,
-  pitchShift,
   onPlayPause,
   onSeek,
   onSpeedChange,
-  onPitchChange,
   onAddBookmark,
   onSongNameChange,
   onArtistNameChange,
@@ -99,8 +95,8 @@ const Player: React.FC<PlayerProps> = ({
         <button onClick={() => onSeek(Math.min(song.duration, currentTime + 10))} className="text-gray-400 hover:text-white transition"><FastForwardIcon className="w-6 h-6" /></button>
       </div>
 
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pt-4">
-        <div className="w-full sm:w-1/2 flex flex-col items-center space-y-2">
+      <div className="flex items-center justify-center pt-4">
+        <div className="w-full sm:w-auto flex flex-col items-center space-y-2">
             <span className="text-sm font-medium text-gray-300">Playback Speed</span>
             <div className="flex items-center space-x-3">
                 <button
@@ -117,28 +113,6 @@ const Player: React.FC<PlayerProps> = ({
                     className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label="Increase playback speed"
                     disabled={playbackSpeed >= 2.0}
-                >
-                    +
-                </button>
-            </div>
-        </div>
-        <div className="w-full sm:w-1/2 flex flex-col items-center space-y-2">
-            <span className="text-sm font-medium text-gray-300">Pitch Shift</span>
-             <div className="flex items-center space-x-3">
-                <button
-                    onClick={() => onPitchChange(Math.max(-12, pitchShift - 1))}
-                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Decrease pitch"
-                    disabled={pitchShift <= -12}
-                >
-                    -
-                </button>
-                <span className="text-lg font-mono w-24 text-center text-white tabular-nums">{pitchShift >= 0 ? '+' : ''}{pitchShift} semi</span>
-                <button
-                    onClick={() => onPitchChange(Math.min(12, pitchShift + 1))}
-                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Increase pitch"
-                    disabled={pitchShift >= 12}
                 >
                     +
                 </button>

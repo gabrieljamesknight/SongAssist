@@ -14,7 +14,7 @@ export interface Bookmark {
 }
 
 export type ActiveView = 'assistant' | 'tabs' | 'bookmarks';
-export type StemIsolation = 'full' | 'no_guitar';
+export type StemIsolation = 'full' | 'guitar' | 'backingTrack' | 'custom';
 
 export interface ChatMessage {
   role: 'user' | 'model';

@@ -6,7 +6,7 @@ interface StemMixerProps {
   onVolumeChange: (stem: Stem, volume: number) => void;
   activeIsolation: StemIsolation;
   onIsolationChange: (isolation: StemIsolation) => void;
-  isSeparating: boolean; // Renamed from isProcessing for clarity
+  isSeparating: boolean;
 }
 
 const StemMixer: React.FC<StemMixerProps> = ({ 
@@ -36,6 +36,41 @@ const StemMixer: React.FC<StemMixerProps> = ({
             />
           </div>
         ))}
+      </div>
+      <div className="mt-6 grid grid-cols-3 gap-2">
+        <button
+          onClick={() => onIsolationChange('guitar')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'guitar'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          Guitar Only
+        </button>
+        <button
+          onClick={() => onIsolationChange('full')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'full'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          Full Mix
+        </button>
+        <button
+          onClick={() => onIsolationChange('backingTrack')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'backingTrack'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          No Guitar
+        </button>
       </div>
     </>
   );

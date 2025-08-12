@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, FC } from 'react';
-import { Song, Bookmark, ActiveView, ChatMessage, Stem } from './types';
+import { Song, Bookmark, ActiveView, ChatMessage, Stem, StemIsolation } from './types';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { FileUpload } from './components/FileUpload';
 import Player from './components/Player';
@@ -8,7 +8,7 @@ import { AIAssistant } from './components/AIAssistant';
 import TabGenerator from './components/TabGenerator';
 import BookmarkList from './components/BookmarkList';
 import { BotIcon, FileTextIcon, BookmarkIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice, generateTabs } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, generateTabs, identifySongFromFileName, SongIdentification } from './services/geminiService';
 
 const App: FC = () => {
     const player = useAudioPlayer();
@@ -23,6 +23,8 @@ const App: FC = () => {
     const [tabGeneratorError, setTabGeneratorError] = useState<string | null>(null);
     const [taskId, setTaskId] = useState<string | null>(null);
     const [originalFileName, setOriginalFileName] = useState<string>('');
+    const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
+
 
     useEffect(() => {
         if (!taskId) return;
@@ -30,7 +32,7 @@ const App: FC = () => {
             clearInterval(poll);
             setIsSeparating(false);
             setAppError("Processing timed out. The server might be busy or the file is unsupported.");
-        }, 300000);
+        }, 3000000);
 
         const poll = setInterval(async () => {
             try {
@@ -41,7 +43,26 @@ const App: FC = () => {
                     const data = await response.json();
                     setIsSeparating(false);
                     const songName = originalFileName.replace(/\.[^/.]+$/, '');
-                    player.load(data.stems, { name: songName, artist: 'Unknown Artist' });
+                    
+                    // Load the song with a temporary "Identifying..." message
+                    await player.load(data.stems, { name: songName, artist: 'Identifying...' });
+                    
+                    const identification = await identifySongFromFileName(originalFileName);
+                    
+                    // Use the title from Gemini
+                    const identifiedTitle = identification?.songTitle || songName;
+                    // Use the artist from Gemini
+                    const identifiedArtist = identification?.artist || 'Unknown Artist';
+                    
+                    // Update the song state
+                    player.setSong(currentSong => {
+                        if (!currentSong) return null;
+                        return {
+                            ...currentSong,
+                            name: identifiedTitle,
+                            artist: identifiedArtist,
+                        };
+                    });
                 }
             } catch (error) { 
                 console.log("Polling for manifest...");
@@ -56,7 +77,8 @@ const App: FC = () => {
 
     useEffect(() => {
         const fetchInitialAnalysis = async () => {
-            if (player.song && player.song.name) {
+            if (player.song && player.song.name && player.song.artist !== 'Identifying...') {
+                setIsAssistantLoading(true);
                 const loadingMessage: ChatMessage = { role: 'model', content: `Analyzing ${player.song.name}...` };
                 setChatMessages([loadingMessage]);
                 const analysis = await getInitialSongAnalysis(player.song.name, player.song.artist);
@@ -67,10 +89,11 @@ const App: FC = () => {
                     const welcomeMessage: ChatMessage = { role: 'model', content: "Welcome! I couldn't find specific info for this song, but feel free to ask me any general questions about playing guitar." };
                     setChatMessages([welcomeMessage]);
                 }
+                setIsAssistantLoading(false);
             }
         };
         fetchInitialAnalysis();
-    }, [player.song?.name]);
+    }, [player.song?.name, player.song?.artist]);
 
     const handleUploadSubmit = (originalFile: File, newTaskId: string) => {
         setAppError(null);
@@ -123,6 +146,22 @@ const App: FC = () => {
         }
     }, [player.song]);
 
+    const handleIsolationChange = (isolation: StemIsolation) => {
+        setActiveIsolation(isolation);
+        switch (isolation) {
+            case 'guitar':
+                player.setStemVolumes({ guitar: 100, backingTrack: 0 });
+                break;
+            case 'backingTrack':
+                player.setStemVolumes({ guitar: 0, backingTrack: 100 });
+                break;
+            case 'full':
+            default:
+                player.setStemVolumes({ guitar: 100, backingTrack: 100 });
+                break;
+        }
+    };
+
     return (
         <div className="min-h-screen bg-gray-900 text-gray-200 p-4 sm:p-6 lg:p-8 font-sans">
             <header className="mb-8 text-center">
@@ -155,20 +194,21 @@ const App: FC = () => {
                                 isPlaying={player.isPlaying}
                                 currentTime={player.currentTime}
                                 playbackSpeed={player.playbackSpeed}
-                                pitchShift={0}
                                 onPlayPause={handlePlayPause}
                                 onSeek={player.seek}
                                 onSpeedChange={player.setPlaybackSpeed}
-                                onPitchChange={() => {}}
                                 onAddBookmark={handleAddBookmark}
                                 onSongNameChange={(name) => player.setSong((s: Song | null) => s ? { ...s, name } : null)}
                                 onArtistNameChange={(artist) => player.setSong((s: Song | null) => s ? { ...s, artist } : null)}
                             />
                             <StemMixer 
                                 stemVolumes={player.stemVolumes} 
-                                onVolumeChange={(stem: Stem, vol: number) => player.setStemVolumes((v: Record<Stem, number>) => ({...v, [stem]: vol}))}
-                                activeIsolation={'full'}
-                                onIsolationChange={() => {}}
+                                onVolumeChange={(stem: Stem, vol: number) => {
+                                    player.setStemVolumes((v: Record<Stem, number>) => ({...v, [stem]: vol}));
+                                    setActiveIsolation('custom');
+                                }}
+                                activeIsolation={activeIsolation}
+                                onIsolationChange={handleIsolationChange}
                                 isSeparating={isSeparating}
                             />
                         </div>
