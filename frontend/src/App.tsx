@@ -36,7 +36,10 @@ const App: FC = () => {
 
         const poll = setInterval(async () => {
             try {
-                const response = await fetch(`http://127.0.0.1:8000/static/htdemucs_6s/${taskId}/manifest.json`);
+        const bucketName = "songassist-stems-gabriel-2025";
+        const awsRegion = "eu-west-2";
+
+        const response = await fetch(`https://${bucketName}.s3.${awsRegion}.amazonaws.com/stems/${taskId}/manifest.json`);
                 if (response.ok) {
                     clearInterval(poll);
                     clearTimeout(separationTimeout);
