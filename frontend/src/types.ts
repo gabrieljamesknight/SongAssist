@@ -20,3 +20,9 @@ export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
 }
+
+export interface Project {
+  taskId: string;
+  originalFileName: string;
+  manifestUrl: string;
+}

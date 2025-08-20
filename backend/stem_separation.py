@@ -20,11 +20,11 @@ class DemucsSeparator:
         )
         self.aws_region = "eu-west-2"
 
-    def separate_audio_stems(self, bucket_name: str, object_key: str, task_id: str):
+    def separate_audio_stems(self, bucket_name: str, object_key: str, task_id: str, username: str, original_filename: str):
         
         local_input_path = INPUT_DIR / Path(object_key).name
         
-        print(f"--- Background task started for S3 object: {object_key} ---")
+        print(f"--- Background task for user '{username}' [ID: {task_id}] started ---")
 
         try:
             # Download the file from S3 to a local temp path
@@ -49,12 +49,12 @@ class DemucsSeparator:
             base_url = f"https://{bucket_name}.s3.{self.aws_region}.amazonaws.com"
             stem_urls = {}
 
-            print(f"Uploading stems from {local_stems_dir} to S3...")
+            print(f"Uploading stems from {local_stems_dir} to S3 for user '{username}'...")
             # Upload guitar and no_guitar stems
             for stem_name in ["guitar", "no_guitar"]:
                 local_file_path = local_stems_dir / f"{stem_name}.wav"
                 if local_file_path.exists():
-                    stem_key = f"stems/{task_id}/{stem_name}.wav"
+                    stem_key = f"stems/{username}/{task_id}/{stem_name}.wav"
                     # Add ACL and ContentType to make the file public
                     self.s3_client.upload_file(
                         str(local_file_path),
@@ -68,8 +68,11 @@ class DemucsSeparator:
                 stem_urls["backingTrack"] = stem_urls.pop("no_guitar")
 
             # Create and upload the manifest.json 
-            manifest_content = {"stems": stem_urls}
-            manifest_key = f"stems/{task_id}/manifest.json"
+            manifest_content = {
+                "stems": stem_urls,
+                "originalFileName": original_filename
+            }
+            manifest_key = f"stems/{username}/{task_id}/manifest.json"
             
             self.s3_client.put_object(
                 Bucket=bucket_name,
@@ -85,7 +88,7 @@ class DemucsSeparator:
             print(f"Stderr: {e.stderr}")
             print(f"Stdout: {e.stdout}")
         except Exception as e:
-            print(f"--- AN UNEXPECTED ERROR OCCURRED ---")
+            print(f"--- AN UNEXPECTED ERROR OCCURRED for task {task_id} ---")
             print(f"Error: {str(e)}")
         finally:
             print("Cleaning up local temporary files...")
