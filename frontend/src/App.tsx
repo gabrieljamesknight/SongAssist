@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, FC } from 'react';
+import { useState, useEffect, useCallback, FC, useRef } from 'react';
 import { Song, Bookmark, ActiveView, ChatMessage, Stem, StemIsolation, Project } from './types';
 import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { FileUpload } from './components/FileUpload';
@@ -28,6 +28,7 @@ const App: FC = () => {
     const [tabGeneratorError, setTabGeneratorError] = useState<string | null>(null);
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
+    const isInitialMount = useRef(true);
 
 
     useEffect(() => {
@@ -78,6 +79,30 @@ const App: FC = () => {
         fetchInitialAnalysis();
     }, [player.song?.name, player.song?.artist]);
 
+    useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+
+        if (!currentUser || !taskId || !player.song) {
+            return;
+        }
+
+        const saveBookmarks = async () => {
+            try {
+                await fetch(`http://127.0.0.1:8000/${currentUser}/${taskId}/bookmarks`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bookmarks),
+                });
+            } catch (error) {
+                console.error("Failed to save bookmarks:", error);
+            }
+        };
+        saveBookmarks();
+
+    }, [bookmarks, currentUser, taskId, player.song]);
 
     const fetchProjects = async (username: string) => {
         const response = await fetch(`http://127.0.0.1:8000/user/${username}/projects`);
@@ -96,7 +121,7 @@ const App: FC = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });
-
+            
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.detail || "Login failed.");
@@ -104,7 +129,7 @@ const App: FC = () => {
             
             // If login is successful, now fetch the projects
             await fetchProjects(username);
-
+        
         } catch (error: any) {
             setAppError(error.message || "Login failed. Please check your credentials and try again.");
             setCurrentUser(null);
@@ -146,6 +171,8 @@ const App: FC = () => {
         setChatMessages([]);
         setTabs(null);
         setAppError(null);
+        setTaskId(null);
+        setActiveView('assistant');
     };
 
     const handleUploadSubmit = (originalFile: File, newTaskId: string) => {
@@ -156,6 +183,8 @@ const App: FC = () => {
         setChatMessages([]);
         setBookmarks([]);
         setTabs(null);
+        setActiveView('assistant');
+        isInitialMount.current = true;
     };
 
     const handleLoadProject = async (manifestUrl: string, originalFileName: string) => {
@@ -165,25 +194,89 @@ const App: FC = () => {
         setBookmarks([]);
         setChatMessages([]);
         setTabs(null);
+        setActiveView('assistant');
+        isInitialMount.current = true;
+
+        const urlParts = manifestUrl.split('/');
+        const loadedTaskId = urlParts[urlParts.length - 2];
+        setTaskId(loadedTaskId);
 
         try {
             const response = await fetch(manifestUrl);
             const data = await response.json();
+            const initialName = originalFileName.replace(/\.[^/.]+$/, '');
+            await player.load(data.stems, { name: initialName, artist: '...' });
+
+            if ('songTitle' in data && 'artist' in data) {
+                player.setSong(s => s ? { ...s, name: data.songTitle, artist: data.artist } : null);
+            } else {
+                player.setSong(s => s ? { ...s, artist: 'Identifying...' } : null);
+                const identification = await identifySongFromFileName(originalFileName);
+                const identifiedTitle = identification?.songTitle || initialName;
+                const aiArtist = identification?.artist;
+                const identifiedArtist = (aiArtist && aiArtist.toLowerCase() !== 'unknown artist') ? aiArtist : '';
+                player.setSong(s => s ? { ...s, name: identifiedTitle, artist: identifiedArtist } : null);
+            }
             
-            await player.load(data.stems, { name: originalFileName.replace(/\.[^/.]+$/, ''), artist: 'Identifying...' });
-            
-            const identification = await identifySongFromFileName(originalFileName);
-            const identifiedTitle = identification?.songTitle || originalFileName.replace(/\.[^/.]+$/, '');
-            const identifiedArtist = identification?.artist || 'Unknown Artist';
-            
-            player.setSong(currentSong => currentSong ? { ...currentSong, name: identifiedTitle, artist: identifiedArtist } : null);
+            const bookmarksUrl = manifestUrl.replace('manifest.json', 'bookmarks.json');
+            try {
+                const bookmarksResponse = await fetch(bookmarksUrl);
+                if (bookmarksResponse.ok) {
+                    const bookmarksData: Bookmark[] = await bookmarksResponse.json();
+                    setBookmarks(bookmarksData);
+                }
+            } catch (bookmarkError) {
+                console.log("No existing bookmarks found for this project.");
+            }
+
         } catch (error) {
             setAppError("Failed to load the selected project.");
         }
     };
+    
+    const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    const saveMetadata = useCallback((songToSave: Song) => {
+        if (!currentUser || !taskId || songToSave.artist === 'Identifying...' || songToSave.artist === '...') {
+            return;
+        }
+
+        if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
+        }
+
+        debounceTimeoutRef.current = setTimeout(async () => {
+            try {
+                await fetch(`http://127.0.0.1:8000/${currentUser}/${taskId}/metadata`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        songTitle: songToSave.name,
+                        artist: songToSave.artist,
+                    }),
+                });
+            } catch (error) {
+                console.error("Failed to save metadata:", error);
+            }
+        }, 750);
+    }, [currentUser, taskId]);
+
+    const handleSongNameChange = (name: string) => {
+        if (!player.song) return;
+        const updatedSong = { ...player.song, name };
+        player.setSong(updatedSong);
+        saveMetadata(updatedSong);
+    };
+
+    const handleArtistNameChange = (artist: string) => {
+        if (!player.song) return;
+        const updatedSong = { ...player.song, artist };
+        player.setSong(updatedSong);
+        saveMetadata(updatedSong);
+    };
+
 
     const handlePlayPause = () => player.isPlaying ? player.pause() : player.play();
-    
     const handleAddBookmark = useCallback(() => setBookmarks(prev => [...prev, { id: Date.now(), time: player.currentTime, label: `Bookmark ${prev.length + 1}` }]), [player.currentTime]);
     const handleDeleteBookmark = useCallback((id: number) => setBookmarks(prev => prev.filter(b => b.id !== id)), []);
     const handleUpdateBookmarkLabel = useCallback((id: number, label: string) => setBookmarks(prev => prev.map(b => (b.id === id ? { ...b, label } : b))), []);
@@ -270,8 +363,8 @@ const App: FC = () => {
                             onSeek={player.seek}
                             onSpeedChange={player.setPlaybackSpeed}
                             onAddBookmark={handleAddBookmark}
-                            onSongNameChange={(name) => player.setSong((s) => s ? { ...s, name } : null)}
-                            onArtistNameChange={(artist) => player.setSong((s) => s ? { ...s, artist } : null)}
+                            onSongNameChange={handleSongNameChange}
+                            onArtistNameChange={handleArtistNameChange}
                         />
                         <StemMixer 
                             stemVolumes={player.stemVolumes} 

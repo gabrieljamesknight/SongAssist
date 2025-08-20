@@ -41,7 +41,7 @@ export const identifySongFromFileName = async (fileName:string): Promise<SongIde
         The filename is: "${fileName}"
         
         Return the song title you've extracted and the artist you've identified. For example, if the filename is "Stairway to Heaven.mp3", you should identify the artist as "Led Zeppelin".
-        If you are completely unable to guess an artist, return "Unknown Artist" in the artist field.`;
+        If you are completely unable to guess an artist, return an empty string in the artist field.`;
 
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',

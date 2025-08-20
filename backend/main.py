@@ -8,6 +8,8 @@ import json
 from dotenv import load_dotenv
 import boto3
 from passlib.context import CryptContext
+from typing import List, Optional
+from pydantic import BaseModel
 
 from stem_separation import DemucsSeparator
 
@@ -41,6 +43,16 @@ app.add_middleware(
 )
 
 separator = DemucsSeparator(model="htdemucs_6s")
+
+class Bookmark(BaseModel):
+    id: int
+    time: float
+    label: str
+
+class SongMetadata(BaseModel):
+    songTitle: str
+    artist: Optional[str] = None
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password"""
@@ -153,6 +165,61 @@ def separate_audio(
         if file:
             file.file.close()
 
+@app.put("/{username}/{task_id}/bookmarks", summary="Save or update bookmarks for a project", status_code=200)
+def save_project_bookmarks(username: str, task_id: str, bookmarks: List[Bookmark]):
+    """
+    Saves or overwrites the bookmarks for a given project
+    """
+    if not username or not task_id:
+        raise HTTPException(status_code=400, detail="Username and Task ID are required.")
+
+    bookmarks_key = f"stems/{username}/{task_id}/bookmarks.json"
+    
+    bookmarks_data = json.dumps([b.dict() for b in bookmarks])
+
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=bookmarks_key,
+            Body=bookmarks_data,
+            ContentType='application/json',
+            ACL='public-read'
+        )
+        return {"message": "Bookmarks saved successfully."}
+    except Exception as e:
+        print(f"Error saving bookmarks for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not save bookmarks.")
+
+
+@app.put("/{username}/{task_id}/metadata", summary="Update project metadata", status_code=200)
+def update_project_metadata(username: str, task_id: str, metadata: SongMetadata):
+    """
+    Updates the song title and artist
+    """
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+
+    try:
+        manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+
+        manifest_data['songTitle'] = metadata.songTitle
+        manifest_data['artist'] = metadata.artist
+
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=manifest_key,
+            Body=json.dumps(manifest_data),
+            ContentType='application/json',
+            ACL='public-read'
+        )
+        return {"message": "Metadata updated successfully."}
+
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Project manifest not found.")
+    except Exception as e:
+        print(f"Error updating metadata for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not update metadata.")
+
 
 @app.get("/user/{username}/projects", summary="Get all projects for a user")
 def get_user_projects(username: str):
@@ -175,16 +242,18 @@ def get_user_projects(username: str):
                 manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
                 manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
                 
+                # Use the saved songTitle from the manifest if it exists
+                display_name = manifest_data.get("songTitle", manifest_data.get("originalFileName", "Unknown File"))
+
                 projects.append({
                     "taskId": task_id,
-                    "originalFileName": manifest_data.get("originalFileName", "Unknown File"),
+                    "originalFileName": display_name,
                     "manifestUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{manifest_key}"
                 })
             except s3_client.exceptions.NoSuchKey:
                 print(f"Warning: Manifest file not found for task {task_id} of user {username}")
                 continue
         
-        # Sort projects by filename
         projects.sort(key=lambda p: p['originalFileName'])
         return {"projects": projects}
         
