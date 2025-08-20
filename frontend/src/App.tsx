@@ -41,7 +41,7 @@ const App: FC = () => {
 
         const poll = setInterval(async () => {
             try {
-                const manifestUrl = `https://${process.env.REACT_APP_S3_BUCKET_NAME}.s3.${process.env.REACT_APP_AWS_REGION}.amazonaws.com/stems/${currentUser}/${taskId}/manifest.json`;
+            const manifestUrl = `https://${import.meta.env.VITE_S3_BUCKET_NAME}.s3.${import.meta.env.VITE_AWS_REGION}.amazonaws.com/stems/${currentUser}/${taskId}/manifest.json`;
                 const response = await fetch(manifestUrl);
                 if (response.ok) {
                     clearInterval(poll);
@@ -79,17 +79,59 @@ const App: FC = () => {
     }, [player.song?.name, player.song?.artist]);
 
 
-    const handleLogin = async (username: string) => {
+    const fetchProjects = async (username: string) => {
+        const response = await fetch(`http://127.0.0.1:8000/user/${username}/projects`);
+        if (!response.ok) throw new Error("Could not fetch projects.");
+        const data = await response.json();
+        setUserProjects(data.projects);
+        setCurrentUser(username);
+    };
+
+    const handleLogin = async (username: string, password: string) => {
         setIsUserLoading(true);
         setAppError(null);
         try {
-            const response = await fetch(`http://127.0.0.1:8000/user/${username}/projects`);
-            if (!response.ok) throw new Error("Could not connect to the server.");
-            const data = await response.json();
-            setUserProjects(data.projects);
-            setCurrentUser(username);
-        } catch (error) {
-            setAppError("Login failed. Please check your connection and try again.");
+            const response = await fetch(`http://127.0.0.1:8000/login/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Login failed.");
+            }
+            
+            // If login is successful, now fetch the projects
+            await fetchProjects(username);
+
+        } catch (error: any) {
+            setAppError(error.message || "Login failed. Please check your credentials and try again.");
+            setCurrentUser(null);
+            setUserProjects([]);
+        } finally {
+            setIsUserLoading(false);
+        }
+    };
+    
+    const handleRegister = async (username: string, password: string) => {
+        setIsUserLoading(true);
+        setAppError(null);
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/register/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            if (!response.ok) {
+                 const errorData = await response.json();
+                throw new Error(errorData.detail || "Registration failed.");
+            }
+            // After successful registration, log the user in automatically
+            await handleLogin(username, password);
+
+        } catch (error: any) {
+            setAppError(error.message || "Registration failed. Please try a different username.");
         } finally {
             setIsUserLoading(false);
         }
@@ -196,7 +238,7 @@ const App: FC = () => {
                     <div className="text-center p-10">
                         <div className="w-16 h-16 border-4 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
                         <p className="mt-4 text-gray-300 text-lg">
-                            {isUserLoading ? "Loading projects..." : isSeparating ? "Separating audio stems..." : "Loading audio..."}
+                            {isUserLoading ? "Loading..." : isSeparating ? "Separating audio stems..." : "Loading audio..."}
                         </p>
                         {isSeparating && <p className="text-sm text-gray-500">(This can take a minute or two)</p>}
                     </div>
@@ -273,7 +315,7 @@ const App: FC = () => {
         }
 
         // Not logged in
-        return <LoginScreen onLogin={handleLogin} isLoading={isUserLoading} />;
+        return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} isLoading={isUserLoading} />;
     };
 
     return (

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -7,10 +7,14 @@ import uuid
 import json
 from dotenv import load_dotenv
 import boto3
+from passlib.context import CryptContext
 
 from stem_separation import DemucsSeparator
 
 load_dotenv()
+
+# Hashes using bcrypt algorithm
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Initialize S3
 s3_client = boto3.client(
@@ -37,6 +41,68 @@ app.add_middleware(
 )
 
 separator = DemucsSeparator(model="htdemucs_6s")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifies a plain password"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """Generates a bcrypt hash"""
+    return pwd_context.hash(password)
+
+@app.post("/register/", summary="Register a new user", status_code=201)
+def register_user(username: str = Body(...), password: str = Body(...)):
+    """
+    Registers a new user
+    """
+    user_info_key = f"stems/{username}/user_info.json"
+    
+    # Check if user already exists
+    try:
+        s3_client.head_object(Bucket=BUCKET_NAME, Key=user_info_key)
+        raise HTTPException(status_code=400, detail="Username already exists.")
+    except s3_client.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == '404':
+            pass
+        else:
+            raise HTTPException(status_code=500, detail="Error checking user existence.")
+
+    hashed_password = get_password_hash(password)
+    user_data = {"username": username, "hashed_password": hashed_password}
+
+    # Store user info
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=user_info_key,
+            Body=json.dumps(user_data),
+            ContentType='application/json'
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not create user: {e}")
+        
+    return {"message": f"User '{username}' registered successfully."}
+
+@app.post("/login/", summary="User login")
+def login_user(username: str = Body(...), password: str = Body(...)):
+    """
+    Authenticates a user
+    """
+    user_info_key = f"stems/{username}/user_info.json"
+
+    # Fetch user data from S3
+    try:
+        user_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=user_info_key)
+        user_data = json.loads(user_obj['Body'].read().decode('utf-8'))
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Invalid username or password.")
+
+    # Verify the password
+    if not verify_password(password, user_data.get("hashed_password")):
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    
+    return {"message": "Login successful", "username": username}
+
 
 @app.get("/", summary="Root endpoint")
 def read_root():
@@ -124,4 +190,4 @@ def get_user_projects(username: str):
         
     except Exception as e:
         print(f"Error fetching projects for user '{username}': {e}")
-        return {"projects": []}
+        raise HTTPException(status_code=500, detail="Could not fetch user projects.")
