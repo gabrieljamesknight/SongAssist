@@ -31,6 +31,8 @@ const App: FC = () => {
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
     const isInitialMount = useRef(true);
     const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const [debouncedSongForAnalysis, setDebouncedSongForAnalysis] = useState<Song | null>(null);
+    const analysisDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         if (!taskId || !currentUser) return;
@@ -65,13 +67,30 @@ const App: FC = () => {
         };
     }, [taskId, currentUser]);
 
-    // Gemini
+    useEffect(() => {
+        if (analysisDebounceRef.current) {
+            clearTimeout(analysisDebounceRef.current);
+        }
+
+        if (player.song && player.song.name && player.song.artist && player.song.artist !== 'Identifying...' && player.song.artist !== '...') {
+            analysisDebounceRef.current = setTimeout(() => {
+                setDebouncedSongForAnalysis(player.song);
+            }, 1500);
+        }
+
+        return () => {
+            if (analysisDebounceRef.current) {
+                clearTimeout(analysisDebounceRef.current);
+            }
+        };
+    }, [player.song]);
+
     useEffect(() => {
         const fetchInitialAnalysis = async () => {
-            if (player.song && player.song.name && player.song.artist && player.song.artist !== 'Identifying...') {
+            if (debouncedSongForAnalysis && debouncedSongForAnalysis.name && debouncedSongForAnalysis.artist) {
                 setIsAssistantLoading(true);
                 setChatMessages([]);
-                const analysis = await getInitialSongAnalysis(player.song.name, player.song.artist);
+                const analysis = await getInitialSongAnalysis(debouncedSongForAnalysis.name, debouncedSongForAnalysis.artist);
                 if (analysis && analysis !== "UNKNOWN_SONG") {
                     setChatMessages([{ role: 'model', content: analysis }]);
                 } else {
@@ -81,8 +100,8 @@ const App: FC = () => {
             }
         };
         fetchInitialAnalysis();
-    }, [player.song?.name, player.song?.artist]);
-
+    }, [debouncedSongForAnalysis]);
+    
     useEffect(() => {
         if (isInitialMount.current) {
             isInitialMount.current = false;
