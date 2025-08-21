@@ -20,6 +20,20 @@ class DemucsSeparator:
         )
         self.aws_region = "eu-west-2"
 
+    def get_audio_duration(self, file_path: str) -> float:
+        """Gets the duration of an audio file in seconds using ffprobe."""
+        try:
+            command = [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", file_path
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return float(result.stdout.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
+            print(f"Warning: Could not determine audio duration using ffprobe ({e}).")
+            print("Defaulting to safe segmentation for this file.")
+            return 999.0
+
     def separate_audio_stems(self, bucket_name: str, object_key: str, task_id: str, username: str, original_filename: str):
         
         local_input_path = INPUT_DIR / Path(object_key).name
@@ -32,14 +46,31 @@ class DemucsSeparator:
             self.s3_client.download_file(bucket_name, object_key, str(local_input_path))
             print("Download complete.")
 
+            duration = self.get_audio_duration(str(local_input_path))
+            
+            SEGMENTATION_THRESHOLD = 420 
+
             command = [
                 "python", "-m", "demucs.separate",
                 "-n", self.model,
                 "--two-stems", "guitar",
+            ]
+
+            if duration > SEGMENTATION_THRESHOLD:
+                print(f"Song duration ({duration:.0f}s) exceeds threshold. Using segmentation and MP3 output.")
+                command.extend([
+                    "--segment", "7",
+                    "--mp3"
+                ])
+            else:
+                print(f"Song duration ({duration:.0f}s) is within threshold. Using standard WAV processing.")
+            
+            command.extend([
                 "--out", str(OUTPUT_DIR),
                 "--filename", "{track}/{stem}.{ext}",
                 str(local_input_path)
-            ]
+            ])
+
             print(f"Running command: {' '.join(command)}")
             subprocess.run(command, capture_output=True, text=True, check=True)
             print("--- Demucs Process Finished Successfully ---")
@@ -48,19 +79,21 @@ class DemucsSeparator:
             local_stems_dir = OUTPUT_DIR / self.model / track_name
             base_url = f"https://{bucket_name}.s3.{self.aws_region}.amazonaws.com"
             stem_urls = {}
+            output_extension = "mp3" if duration > SEGMENTATION_THRESHOLD else "wav"
+            content_type = f"audio/{output_extension}"
 
             print(f"Uploading stems from {local_stems_dir} to S3 for user '{username}'...")
             # Upload guitar and no_guitar stems
             for stem_name in ["guitar", "no_guitar"]:
-                local_file_path = local_stems_dir / f"{stem_name}.wav"
+                local_file_path = local_stems_dir / f"{stem_name}.{output_extension}"
                 if local_file_path.exists():
-                    stem_key = f"stems/{username}/{task_id}/{stem_name}.wav"
+                    stem_key = f"stems/{username}/{task_id}/{stem_name}.{output_extension}"
                     # Add ACL and ContentType to make the file public
                     self.s3_client.upload_file(
                         str(local_file_path),
                         bucket_name,
                         stem_key,
-                        ExtraArgs={'ACL': 'public-read', 'ContentType': 'audio/wav'}
+                        ExtraArgs={'ACL': 'public-read', 'ContentType': content_type}
                     )
                     stem_urls[stem_name] = f"{base_url}/{stem_key}"
             

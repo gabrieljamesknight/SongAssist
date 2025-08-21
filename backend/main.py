@@ -10,6 +10,7 @@ import boto3
 from passlib.context import CryptContext
 from typing import List, Optional
 from pydantic import BaseModel
+import shutil
 
 from stem_separation import DemucsSeparator
 
@@ -26,6 +27,8 @@ s3_client = boto3.client(
 )
 BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME")
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-2")
+TEMP_UPLOAD_DIR = Path(__file__).parent / "temp_uploads"
+TEMP_UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 app = FastAPI(
@@ -62,6 +65,30 @@ def get_password_hash(password: str) -> str:
     """Generates a bcrypt hash"""
     return pwd_context.hash(password)
 
+def upload_and_separate(temp_file_path: str, object_key: str, task_id: str, username: str, original_filename: str):
+    """
+    Background task that first uploads the file to S3, then starts separation
+    """
+    try:
+        print(f"[{task_id}] Background task: Uploading {temp_file_path} to S3 bucket {BUCKET_NAME}...")
+        s3_client.upload_file(temp_file_path, BUCKET_NAME, object_key)
+        print(f"[{task_id}] Background task: S3 upload complete.")
+
+        separator.separate_audio_stems(
+            BUCKET_NAME,
+            object_key,
+            task_id,
+            username,
+            original_filename
+        )
+    except Exception as e:
+        print(f"--- AN ERROR OCCURRED IN BACKGROUND TASK for task {task_id} ---")
+        print(f"Error: {str(e)}")
+    finally:
+        print(f"[{task_id}] Background task: Cleaning up temporary file {temp_file_path}.")
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
 @app.post("/register/", summary="Register a new user", status_code=201)
 def register_user(username: str = Body(...), password: str = Body(...)):
     """
@@ -92,7 +119,7 @@ def register_user(username: str = Body(...), password: str = Body(...)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not create user: {e}")
-        
+
     return {"message": f"User '{username}' registered successfully."}
 
 @app.post("/login/", summary="User login")
@@ -135,16 +162,17 @@ def separate_audio(
         file_extension = Path(original_filename).suffix if original_filename else ".tmp"
         task_id = str(uuid.uuid4())
         
-        # Define the path for file in the S3 bucket
-        object_key = f"uploads/{task_id}{file_extension}"
+        temp_file_path = str(TEMP_UPLOAD_DIR / f"{task_id}{file_extension}")
+        
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-        # Upload file to S3 from memory
-        s3_client.upload_fileobj(file.file, BUCKET_NAME, object_key)
+        object_key = f"uploads/{task_id}{file_extension}"
 
         # Pass original_filename to the background task
         background_tasks.add_task(
-            separator.separate_audio_stems,
-            BUCKET_NAME,
+            upload_and_separate,
+            temp_file_path,
             object_key,
             task_id,
             username,
@@ -256,7 +284,7 @@ def get_user_projects(username: str):
         
         projects.sort(key=lambda p: p['originalFileName'])
         return {"projects": projects}
-        
+
     except Exception as e:
         print(f"Error fetching projects for user '{username}': {e}")
         raise HTTPException(status_code=500, detail="Could not fetch user projects.")
