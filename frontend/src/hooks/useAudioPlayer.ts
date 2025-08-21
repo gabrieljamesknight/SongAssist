@@ -180,7 +180,11 @@ export const useAudioPlayer = (): AudioPlayerControls => {
             buffersRef.current.guitar = decodedGuitar;
             buffersRef.current.backingTrack = decodedBacking;
             
-            setSong({ ...songDetails, duration: decodedGuitar.duration });
+            setSong({ 
+                ...songDetails, 
+                duration: decodedGuitar.duration,
+                artistConfirmed: false 
+            });
         } catch (err) {
             console.error(err);
             setError("Failed to load audio. The file might be unsupported.");

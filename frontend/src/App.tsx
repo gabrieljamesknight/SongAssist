@@ -18,6 +18,7 @@ const App: FC = () => {
     const [userProjects, setUserProjects] = useState<Project[]>([]);
     const [isUserLoading, setIsUserLoading] = useState<boolean>(false);
     const [isSeparating, setIsSeparating] = useState(false);
+    const [isProjectLoading, setIsProjectLoading] = useState<boolean>(false);
     const [appError, setAppError] = useState<string | null>(null);
     const [activeView, setActiveView] = useState<ActiveView>('assistant');
     const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
@@ -29,7 +30,7 @@ const App: FC = () => {
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
     const isInitialMount = useRef(true);
-
+    const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         if (!taskId || !currentUser) return;
@@ -47,6 +48,9 @@ const App: FC = () => {
                 if (response.ok) {
                     clearInterval(poll);
                     clearTimeout(separationTimeout);
+                    
+                    await fetchProjects(currentUser);
+
                     const data = await response.json();
                     await handleLoadProject(manifestUrl, data.originalFileName);
                 }
@@ -85,7 +89,7 @@ const App: FC = () => {
             return;
         }
 
-        if (!currentUser || !taskId || !player.song) {
+        if (!currentUser || !taskId) {
             return;
         }
 
@@ -102,7 +106,7 @@ const App: FC = () => {
         };
         saveBookmarks();
 
-    }, [bookmarks, currentUser, taskId, player.song]);
+    }, [bookmarks, currentUser, taskId]);
 
     const fetchProjects = async (username: string) => {
         const response = await fetch(`http://127.0.0.1:8000/user/${username}/projects`);
@@ -152,7 +156,6 @@ const App: FC = () => {
                  const errorData = await response.json();
                 throw new Error(errorData.detail || "Registration failed.");
             }
-            // After successful registration, log the user in automatically
             await handleLogin(username, password);
 
         } catch (error: any) {
@@ -162,7 +165,10 @@ const App: FC = () => {
         }
     };
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
+        }
         player.pause();
         setCurrentUser(null);
         setUserProjects([]);
@@ -173,6 +179,20 @@ const App: FC = () => {
         setAppError(null);
         setTaskId(null);
         setActiveView('assistant');
+    };
+
+    const handleBackToProjects = () => {
+        if (player.isPlaying) {
+            player.pause();
+        }
+        player.setSong(null);
+        setBookmarks([]);
+        setChatMessages([]);
+        setTabs(null);
+        setAppError(null);
+        setTaskId(null);
+        setActiveView('assistant');
+        isInitialMount.current = true; 
     };
 
     const handleUploadSubmit = (originalFile: File, newTaskId: string) => {
@@ -186,9 +206,23 @@ const App: FC = () => {
         setActiveView('assistant');
         isInitialMount.current = true;
     };
+    
+    const saveProjectMetadata = async (taskIdToSave: string, metadata: { songTitle: string; artist: string; }) => {
+        if (!currentUser) return;
+        try {
+            await fetch(`http://127.0.0.1:8000/${currentUser}/${taskIdToSave}/metadata`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(metadata),
+            });
+        } catch (error) {
+            console.error("Failed to save metadata:", error);
+        }
+    };
 
     const handleLoadProject = async (manifestUrl: string, originalFileName: string) => {
-        setIsSeparating(false);
+        setIsProjectLoading(true);
+        
         player.setSong(null);
         setAppError(null);
         setBookmarks([]);
@@ -196,85 +230,98 @@ const App: FC = () => {
         setTabs(null);
         setActiveView('assistant');
         isInitialMount.current = true;
-
+    
         const urlParts = manifestUrl.split('/');
         const loadedTaskId = urlParts[urlParts.length - 2];
         setTaskId(loadedTaskId);
-
+    
         try {
             const response = await fetch(manifestUrl);
             const data = await response.json();
-            const initialName = originalFileName.replace(/\.[^/.]+$/, '');
-            await player.load(data.stems, { name: initialName, artist: '...' });
-
-            if ('songTitle' in data && 'artist' in data) {
-                player.setSong(s => s ? { ...s, name: data.songTitle, artist: data.artist } : null);
-            } else {
-                player.setSong(s => s ? { ...s, artist: 'Identifying...' } : null);
-                const identification = await identifySongFromFileName(originalFileName);
-                const identifiedTitle = identification?.songTitle || initialName;
-                const aiArtist = identification?.artist;
-                const identifiedArtist = (aiArtist && aiArtist.toLowerCase() !== 'unknown artist') ? aiArtist : '';
-                player.setSong(s => s ? { ...s, name: identifiedTitle, artist: identifiedArtist } : null);
-            }
-            
+    
+            let bookmarksData: Bookmark[] = [];
             const bookmarksUrl = manifestUrl.replace('manifest.json', 'bookmarks.json');
             try {
                 const bookmarksResponse = await fetch(bookmarksUrl);
                 if (bookmarksResponse.ok) {
-                    const bookmarksData: Bookmark[] = await bookmarksResponse.json();
-                    setBookmarks(bookmarksData);
+                    bookmarksData = await bookmarksResponse.json();
                 }
             } catch (bookmarkError) {
                 console.log("No existing bookmarks found for this project.");
             }
-
+    
+            const nameWithoutExt = originalFileName.replace(/\.[^/.]+$/, '');
+            const cleanedName = nameWithoutExt.replace(/^\d+[\s.-]*/, '');
+            
+            await player.load(data.stems, { name: cleanedName, artist: '...' });
+            
+            let finalTitle = cleanedName;
+            let finalArtist = '';
+    
+            if ('songTitle' in data && data.songTitle) {
+                finalTitle = data.songTitle;
+                finalArtist = data.artist || '';
+                player.setSong(s => s ? { ...s, name: finalTitle, artist: finalArtist, artistConfirmed: true } : null);
+            } else {
+                player.setSong(s => s ? { ...s, artist: 'Identifying...', artistConfirmed: false } : null);
+                const identification = await identifySongFromFileName(cleanedName);
+                
+                const identifiedTitle = identification?.songTitle || cleanedName;
+                const aiArtist = identification?.artist;
+                const identifiedArtist = (aiArtist && aiArtist.toLowerCase() !== 'unknown artist') ? aiArtist : '';
+    
+                finalTitle = identifiedTitle;
+                finalArtist = identifiedArtist;
+    
+                player.setSong(s => s ? { ...s, name: finalTitle, artist: finalArtist, artistConfirmed: false } : null);
+                
+                await saveProjectMetadata(loadedTaskId, { songTitle: finalTitle, artist: finalArtist });
+            }
+            
+            setBookmarks(bookmarksData);
+    
+            setUserProjects(currentProjects => 
+                currentProjects.map(p => 
+                    p.taskId === loadedTaskId 
+                        ? { ...p, originalFileName: finalTitle } 
+                        : p
+                )
+            );
+    
         } catch (error) {
             setAppError("Failed to load the selected project.");
+            player.setSong(null);
+        } finally {
+            setIsProjectLoading(false);
+            setIsSeparating(false);
         }
     };
     
-    const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-    const saveMetadata = useCallback((songToSave: Song) => {
+    const handleDebouncedMetadataSave = useCallback((songToSave: Song) => {
         if (!currentUser || !taskId || songToSave.artist === 'Identifying...' || songToSave.artist === '...') {
             return;
         }
-
+        const payload = { songTitle: songToSave.name, artist: songToSave.artist };
+        const saveFn = () => saveProjectMetadata(taskId, payload);
         if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
         }
-
-        debounceTimeoutRef.current = setTimeout(async () => {
-            try {
-                await fetch(`http://127.0.0.1:8000/${currentUser}/${taskId}/metadata`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        songTitle: songToSave.name,
-                        artist: songToSave.artist,
-                    }),
-                });
-            } catch (error) {
-                console.error("Failed to save metadata:", error);
-            }
-        }, 750);
+        debounceTimeoutRef.current = setTimeout(saveFn, 750);
     }, [currentUser, taskId]);
 
     const handleSongNameChange = (name: string) => {
         if (!player.song) return;
         const updatedSong = { ...player.song, name };
         player.setSong(updatedSong);
-        saveMetadata(updatedSong);
+        handleDebouncedMetadataSave(updatedSong);
     };
 
     const handleArtistNameChange = (artist: string) => {
         if (!player.song) return;
-        const updatedSong = { ...player.song, artist };
+        const updatedSong = { ...player.song, artist, artistConfirmed: true };
         player.setSong(updatedSong);
-        saveMetadata(updatedSong);
+        handleDebouncedMetadataSave(updatedSong);
     };
-
 
     const handlePlayPause = () => player.isPlaying ? player.pause() : player.play();
     const handleAddBookmark = useCallback(() => setBookmarks(prev => [...prev, { id: Date.now(), time: player.currentTime, label: `Bookmark ${prev.length + 1}` }]), [player.currentTime]);
@@ -322,24 +369,34 @@ const App: FC = () => {
         }
     };
 
-
     const renderContent = () => {
         // Loading
-        if (isUserLoading || isSeparating || player.isLoading) {
+        if (isProjectLoading || isSeparating || player.isLoading) {
             return (
                 <div className="max-w-2xl mx-auto mt-4">
                     <div className="text-center p-10">
                         <div className="w-16 h-16 border-4 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
                         <p className="mt-4 text-gray-300 text-lg">
-                            {isUserLoading ? "Loading..." : isSeparating ? "Separating audio stems..." : "Loading audio..."}
+                            {isProjectLoading ? "Loading project..." : isSeparating ? "Separating audio stems..." : "Loading audio..."}
                         </p>
                         {isSeparating && <p className="text-sm text-gray-500">(This can take a minute or two)</p>}
                     </div>
                 </div>
             );
         }
-
+        
         // Logged In, no song 
+        if (isUserLoading) {
+             return (
+                <div className="max-w-2xl mx-auto mt-4">
+                    <div className="text-center p-10">
+                        <div className="w-16 h-16 border-4 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        <p className="mt-4 text-gray-300 text-lg">Loading...</p>
+                    </div>
+                </div>
+            );
+        }
+
         if (currentUser && !player.song) {
             return (
                 <div className="max-w-2xl mx-auto mt-4 space-y-8">
@@ -419,6 +476,14 @@ const App: FC = () => {
                 {currentUser && (
                     <div className="absolute top-0 right-0 flex items-center gap-4">
                         <span className="text-gray-300">Welcome, <strong className="font-semibold text-white">{currentUser}</strong></span>
+                        
+                        {player.song && (
+                             <button onClick={handleBackToProjects} className="flex items-center gap-2 bg-gray-700 hover:bg-teal-800/50 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
+                                Projects
+                            </button>
+                        )}
+
                         <button onClick={handleLogout} className="flex items-center gap-2 bg-gray-700 hover:bg-red-800/50 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                            <LogOutIcon className="w-5 h-5" /> Logout
                         </button>

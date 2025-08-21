@@ -3,8 +3,9 @@ export const ALL_STEMS: Stem[] = ['guitar', 'backingTrack'];
 
 export interface Song {
   name: string;
-  artist?: string;
+  artist: string;
   duration: number;
+  artistConfirmed: boolean;
 }
 
 export interface Bookmark {

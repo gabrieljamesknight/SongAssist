@@ -22,9 +22,14 @@ const StemMixer: React.FC<StemMixerProps> = ({
       <div className="space-y-4">
         {(['guitar', 'backingTrack'] as Stem[]).map((stem) => (
           <div key={stem}>
-            <label className="capitalize mb-1 block text-sm font-medium text-gray-300">
-              {stem === 'backingTrack' ? 'Backing Track' : 'Guitar'}
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="capitalize block text-sm font-medium text-gray-300">
+                {stem === 'backingTrack' ? 'Backing Track' : 'Guitar'}
+              </label>
+              <span className="text-sm font-mono text-gray-400 tabular-nums">
+                {stemVolumes[stem]}%
+              </span>
+            </div>
             <input
               type="range"
               min="0"
