@@ -6,7 +6,7 @@ interface StemMixerProps {
   onVolumeChange: (stem: Stem, volume: number) => void;
   activeIsolation: StemIsolation;
   onIsolationChange: (isolation: StemIsolation) => void;
-  isSeparating: boolean; // Renamed from isProcessing for clarity
+  isSeparating: boolean;
 }
 
 const StemMixer: React.FC<StemMixerProps> = ({ 
@@ -22,9 +22,14 @@ const StemMixer: React.FC<StemMixerProps> = ({
       <div className="space-y-4">
         {(['guitar', 'backingTrack'] as Stem[]).map((stem) => (
           <div key={stem}>
-            <label className="capitalize mb-1 block text-sm font-medium text-gray-300">
-              {stem === 'backingTrack' ? 'Backing Track' : 'Guitar'}
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="capitalize block text-sm font-medium text-gray-300">
+                {stem === 'backingTrack' ? 'Backing Track' : 'Guitar'}
+              </label>
+              <span className="text-sm font-mono text-gray-400 tabular-nums">
+                {stemVolumes[stem]}%
+              </span>
+            </div>
             <input
               type="range"
               min="0"
@@ -36,6 +41,41 @@ const StemMixer: React.FC<StemMixerProps> = ({
             />
           </div>
         ))}
+      </div>
+      <div className="mt-6 grid grid-cols-3 gap-2">
+        <button
+          onClick={() => onIsolationChange('guitar')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'guitar'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          Guitar Only
+        </button>
+        <button
+          onClick={() => onIsolationChange('full')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'full'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          Full Mix
+        </button>
+        <button
+          onClick={() => onIsolationChange('backingTrack')}
+          disabled={isSeparating}
+          className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            activeIsolation === 'backingTrack'
+              ? 'bg-teal-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+        >
+          No Guitar
+        </button>
       </div>
     </>
   );

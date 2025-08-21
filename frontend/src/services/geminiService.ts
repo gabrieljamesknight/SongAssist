@@ -10,6 +10,12 @@ if (API_KEY) {
   console.warn("API_KEY environment variable not set. AI features will not work.");
 }
 
+// Define a type for the structured response from Gemini
+export interface SongIdentification {
+    songTitle: string;
+    artist: string;
+}
+
 const parseJsonResponse = <T,>(text: string): T | null => {
     let jsonStr = text.trim();
     const fenceRegex = /^```(\w*)?\s*\n?(.*?)\n?\s*```$/s;
@@ -24,6 +30,50 @@ const parseJsonResponse = <T,>(text: string): T | null => {
         return null;
     }
 };
+
+export const identifySongFromFileName = async (fileName:string): Promise<SongIdentification | null> => {
+    if (!ai) {
+        console.error("API Key not configured.");
+        return null;
+    }
+    try {
+        const prompt = `From the following filename, analyze the song title and attempt to identify the most likely artist for that song, even if the artist is not in the filename.
+        The filename is: "${fileName}"
+        
+        Return the song title you've extracted and the artist you've identified. For example, if the filename is "Stairway to Heaven.mp3", you should identify the artist as "Led Zeppelin".
+        If you are completely unable to guess an artist, return an empty string in the artist field.`;
+
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                systemInstruction: "You are an expert in music and file name parsing. Your task is to extract the song title and infer the artist from a file name and return it as a clean JSON object.",
+                // Ensure Gemini returns the data in the specified JSON format
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: "OBJECT",
+                    properties: {
+                        "songTitle": { "type": "STRING" },
+                        "artist": { "type": "STRING" }
+                    },
+                    required: ["songTitle", "artist"]
+                }
+            }
+        });
+
+        const resultText = response.text;
+        if (resultText) {
+            // The response should be a valid JSON string based on the schema
+            return JSON.parse(resultText) as SongIdentification;
+        }
+        return null;
+
+    } catch (error) {
+        console.error("Error identifying song from file name:", error);
+        return null;
+    }
+};
+
 
 export const getInitialSongAnalysis = async (songTitle: string, artist: string | undefined): Promise<string> => {
     if (!ai) return "API Key not configured. Please set the API_KEY environment variable.";

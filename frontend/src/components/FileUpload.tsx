@@ -1,13 +1,14 @@
-import { useState, useCallback, FC } from 'react';
+import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, Loader2, Music } from 'lucide-react';
 
 interface FileUploadProps {
   // Update the callback to include the taskId from the backend
   onUploadSubmit: (originalFile: File, taskId: string) => void;
+  currentUser: string;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSubmit }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSubmit, currentUser }) => {
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +37,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadSubmit }) => {
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('username', currentUser);
 
     try {
       const response = await fetch('http://127.0.0.1:8000/separate/', {

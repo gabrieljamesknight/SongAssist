@@ -3,8 +3,9 @@ export const ALL_STEMS: Stem[] = ['guitar', 'backingTrack'];
 
 export interface Song {
   name: string;
-  artist?: string;
+  artist: string;
   duration: number;
+  artistConfirmed: boolean;
 }
 
 export interface Bookmark {
@@ -14,9 +15,15 @@ export interface Bookmark {
 }
 
 export type ActiveView = 'assistant' | 'tabs' | 'bookmarks';
-export type StemIsolation = 'full' | 'no_guitar';
+export type StemIsolation = 'full' | 'guitar' | 'backingTrack' | 'custom';
 
 export interface ChatMessage {
   role: 'user' | 'model';
   content: string;
+}
+
+export interface Project {
+  taskId: string;
+  originalFileName: string;
+  manifestUrl: string;
 }
