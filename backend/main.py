@@ -6,15 +6,21 @@ import os
 import uuid
 import json
 from dotenv import load_dotenv
+
+load_dotenv()
+
 import boto3
 from passlib.context import CryptContext
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import shutil
+from fastapi import Query
+from gemini_client import analyze_guitar_file, generate_text_from_prompt
+import requests
 
 from stem_separation import DemucsSeparator
 
-load_dotenv()
+
 
 # Hashes using bcrypt algorithm
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -53,6 +59,25 @@ class Bookmark(BaseModel):
     label: str
 
 class SongMetadata(BaseModel):
+    songTitle: str
+    artist: Optional[str] = None
+
+class IdentifyRequest(BaseModel):
+    rawFileName: str
+
+class AnalysisRequest(BaseModel):
+    songTitle: str
+    artist: Optional[str] = None
+
+class AdviceRequest(BaseModel):
+    songTitle: str
+    artist: Optional[str] = None
+    section: Optional[str] = None
+    currentIsolation: Optional[str] = None
+    difficulty: Optional[int] = None
+    bookmarks: Optional[List[Dict[str, Any]]] = None
+
+class TabsRequest(BaseModel):
     songTitle: str
     artist: Optional[str] = None
 
@@ -147,8 +172,134 @@ def login_user(username: str = Body(...), password: str = Body(...)):
 def read_root():
     return {"message": "Welcome to SongAssist API! The server is running."}
 
+@app.get("/project/{username}/{task_id}/manifest")
+def get_project_manifest(username: str, task_id: str):
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+    try:
+        manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        return JSONResponse(content=manifest_data)
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Manifest not yet available.")
+    except Exception as e:
+        print(f"Error fetching manifest for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not fetch project manifest.")
 
-@app.post("/separate/", summary="Separate audio stems", status_code=202)
+@app.get("/project/{username}/{task_id}/bookmarks") # Added to support bookmarks loading via proxy
+def get_project_bookmarks(username: str, task_id: str): # Added to support bookmarks loading via proxy
+    bookmarks_key = f"stems/{username}/{task_id}/bookmarks.json" # Added to support bookmarks loading via proxy
+    try: # Added to support bookmarks loading via proxy
+        bookmarks_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=bookmarks_key) # Added to support bookmarks loading via proxy
+        bookmarks_data = json.loads(bookmarks_obj['Body'].read().decode('utf-8')) # Added to support bookmarks loading via proxy
+        return JSONResponse(content=bookmarks_data) # Added to support bookmarks loading via proxy
+    except s3_client.exceptions.NoSuchKey: # Added to support bookmarks loading via proxy
+        return JSONResponse(content=[], status_code=404) # Added to support bookmarks loading via proxy
+    except Exception as e: # Added to support bookmarks loading via proxy
+        print(f"Error fetching bookmarks for user '{username}', task '{task_id}': {e}") # Added to support bookmarks loading via proxy
+        raise HTTPException(status_code=500, detail="Could not fetch project bookmarks.") # Added to support bookmarks loading via proxy
+
+@app.post("/gemini/identify-from-filename")
+def identify_song(req_body: IdentifyRequest):
+    system_prompt = """You are a music expert. Your task is to identify a song title and artist from a raw audio filename.
+    The filename might contain track numbers, garbage text, or underscores. Clean it up and provide the most likely song title and artist.
+    Respond ONLY with a JSON object in the format: {"songTitle": "...", "artist": "..."}.
+    If you cannot determine the artist, use "Unknown Artist".
+    """
+    user_prompt = f"Filename: \"{req_body.rawFileName}\""
+    response_data = generate_text_from_prompt(system_prompt, user_prompt)
+    try:
+        json_text = response_data.get("text", "{}")
+        if "```json" in json_text:
+            json_text = json_text.split("```json")[1].split("```")[0]
+        parsed_json = json.loads(json_text)
+        return parsed_json
+    except (json.JSONDecodeError, IndexError):
+        return {"songTitle": req_body.rawFileName, "artist": "Unknown Artist"}
+
+@app.post("/gemini/initial-analysis")
+def get_initial_analysis(req_body: AnalysisRequest):
+    system_prompt = """You are a helpful and encouraging guitar practice assistant.
+    A user has just loaded a song. Provide a brief, welcoming analysis (2-3 sentences).
+    Mention the song's key characteristics, what makes it interesting to learn on guitar, and one or two key techniques to listen for.
+    Keep it concise and positive.
+    """
+    user_prompt = f"The song is \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
+    return generate_text_from_prompt(system_prompt, user_prompt)
+
+@app.post("/gemini/playing-advice")
+def get_playing_advice(req_body: AdviceRequest):
+    system_prompt = """You are a helpful and encouraging guitar practice assistant. The user is asking for advice about playing a specific song.
+    Use the provided context to give a clear, actionable, and encouraging response.
+    Focus on techniques, practice strategies, or music theory relevant to their question.
+    """
+    context_parts = [f"The user is working on \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."]
+    if req_body.bookmarks:
+        context_parts.append(f"They have set {len(req_body.bookmarks)} bookmarks.")
+    if req_body.difficulty:
+        context_parts.append(f"They perceive the difficulty as {req_body.difficulty}/10.")
+    context_parts.append(f"\nUser's question: \"{req_body.section}\"")
+    user_prompt = "\n".join(context_parts)
+    return generate_text_from_prompt(system_prompt, user_prompt)
+
+@app.post("/gemini/generate-tabs")
+def generate_tabs(req_body: TabsRequest):
+    system_prompt = """You are an expert guitar tab generator.
+    Your task is to create a simple, text-based (ASCII) guitar tab for the main riff or a key section of the requested song.
+    Do not tab out the entire song. Focus on one or two iconic parts.
+    Include a brief title (e.g., "Main Riff") and the tuning if it's not standard.
+    Your output should be formatted as plain text suitable for a `<pre>` tag. Use markdown for code blocks.
+    """
+    user_prompt = f"Please generate tabs for \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
+    return generate_text_from_prompt(system_prompt, user_prompt)
+
+
+@app.post("/gemini/analyze-stem")
+def analyze_stem_with_gemini(
+    username: str = Form(...),
+    task_id: str = Form(...),
+    prompt: str = Form(""),
+    include_essentia: bool = Form(False),
+):
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+    try:
+        obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest = json.loads(obj["Body"].read().decode("utf-8"))
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Project manifest not found.")
+    stems = manifest.get("stems", {})
+    guitar_url = stems.get("guitar") or stems.get("Guitar")
+    if not guitar_url:
+        raise HTTPException(status_code=400, detail="Guitar stem not found in manifest.")
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tmp:
+            r = requests.get(guitar_url, timeout=60)
+            r.raise_for_status()
+            tmp.write(r.content)
+            local_audio_path = tmp.name
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch stem: {e}")
+    extra_ctx = None
+    if include_essentia:
+        ess_key = f"stems/{username}/{task_id}/essentia.json"
+        try:
+            ess_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=ess_key)
+            extra_ctx = json.loads(ess_obj["Body"].read().decode("utf-8"))
+        except s3_client.exceptions.NoSuchKey:
+            extra_ctx = {"warning": "essentia.json not found"}
+    try:
+        result = analyze_guitar_file(local_audio_path, user_prompt=prompt, extra_context_json=extra_ctx)
+        result_key = f"stems/{username}/{task_id}/gemini_analysis.json"
+        s3_client.put_object(
+            Bucket=BUCKET_NAME, Key=result_key,
+            Body=json.dumps(result), ContentType="application/json", ACL="public-read"
+        )
+        return {"ok": True, "result": result,
+                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){result_key}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
+
+
+@app.post("/separate/", status_code=202)
 def separate_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -184,7 +335,7 @@ def separate_audio(
             "filename": original_filename,
             "taskId": task_id 
         }
-        
+
         return JSONResponse(content=content)
 
     except Exception as e:
@@ -276,7 +427,7 @@ def get_user_projects(username: str):
                 projects.append({
                     "taskId": task_id,
                     "originalFileName": display_name,
-                    "manifestUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{manifest_key}"
+                    "manifestUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){manifest_key}"
                 })
             except s3_client.exceptions.NoSuchKey:
                 print(f"Warning: Manifest file not found for task {task_id} of user {username}")

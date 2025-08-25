@@ -35,7 +35,7 @@ const App: FC = () => {
     const analysisDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
-        if (!taskId || !currentUser) return;
+        if (!taskId || !currentUser || !isSeparating) return;
 
         const separationTimeout = setTimeout(() => {
             clearInterval(poll);
@@ -45,7 +45,7 @@ const App: FC = () => {
 
         const poll = setInterval(async () => {
             try {
-            const manifestUrl = `https://${import.meta.env.VITE_S3_BUCKET_NAME}.s3.${import.meta.env.VITE_AWS_REGION}.amazonaws.com/stems/${currentUser}/${taskId}/manifest.json`;
+                const manifestUrl = `${import.meta.env.VITE_API_BASE}/project/${currentUser}/${taskId}/manifest`;
                 const response = await fetch(manifestUrl);
                 if (response.ok) {
                     clearInterval(poll);
@@ -65,7 +65,7 @@ const App: FC = () => {
             clearInterval(poll);
             clearTimeout(separationTimeout);
         };
-    }, [taskId, currentUser]);
+    }, [taskId, currentUser, isSeparating]);
 
     useEffect(() => {
         if (analysisDebounceRef.current) {
@@ -256,10 +256,14 @@ const App: FC = () => {
     
         try {
             const response = await fetch(manifestUrl);
+            if (!response.ok) {
+                throw new Error(`Manifest fetch failed with status: ${response.status}`);
+            }
             const data = await response.json();
     
             let bookmarksData: Bookmark[] = [];
-            const bookmarksUrl = manifestUrl.replace('manifest.json', 'bookmarks.json');
+            const bookmarksUrl = manifestUrl.replace(/\/manifest$/, '/bookmarks');
+
             try {
                 const bookmarksResponse = await fetch(bookmarksUrl);
                 if (bookmarksResponse.ok) {
@@ -308,6 +312,7 @@ const App: FC = () => {
             );
     
         } catch (error) {
+            console.error("Error in handleLoadProject:", error);
             setAppError("Failed to load the selected project.");
             player.setSong(null);
         } finally {
@@ -353,7 +358,11 @@ const App: FC = () => {
         setChatMessages(prev => [...prev, userMessage]);
         setIsAssistantLoading(true);
         try {
-            const responseText = await getPlayingAdvice(player.song.name, player.song.artist, query);
+            const responseText = await getPlayingAdvice({
+            songTitle: player.song.name,
+            artist: player.song.artist,
+            section: query,
+            });
             const modelMessage: ChatMessage = { role: 'model', content: responseText };
             setChatMessages(prev => [...prev, modelMessage]);
         } catch (error) {
@@ -420,7 +429,16 @@ const App: FC = () => {
             return (
                 <div className="max-w-2xl mx-auto mt-4 space-y-8">
                     <FileUpload onUploadSubmit={handleUploadSubmit} currentUser={currentUser} />
-                    <ProjectList projects={userProjects} onLoadProject={(url) => handleLoadProject(url, userProjects.find(p => p.manifestUrl === url)?.originalFileName || '')} />
+                    <ProjectList
+                        projects={userProjects}
+                        onLoadProject={(manifestUrl) => {
+                            const project = userProjects.find(p => p.manifestUrl === manifestUrl);
+                            if (project && currentUser) {
+                                const proxyUrl = `${import.meta.env.VITE_API_BASE}/project/${currentUser}/${project.taskId}/manifest`;
+                                handleLoadProject(proxyUrl, project.originalFileName);
+                            }
+                        }}
+                    />
                 </div>
             );
         }
