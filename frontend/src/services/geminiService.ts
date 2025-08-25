@@ -88,6 +88,7 @@ export const generateTabsFromStem = async (username: string, taskId: string): Pr
   const formData = new FormData(); 
   formData.append('username', username); 
   formData.append('task_id', taskId); 
+  formData.append('include_essentia', 'true');
 
   const res = await fetch(`${base}/gemini/analyze-stem`, { 
     method: "POST", 
@@ -107,7 +108,7 @@ export const generateTabsFromStem = async (username: string, taskId: string): Pr
 
   const result = data.result; 
     
-  let formattedTabs = `Tuning: ${result.tuning || 'Unknown'}\nKey: ${result.key || 'Unknown'}\nDifficulty: ${result.difficulty || 'N/A'}/10\n\n`; 
+  let formattedTabs = `Tuning: ${result.tuning || 'Unknown'}\nKey: ${result.key || 'Unknown'}\nBPM: ${result.bpm || 'N/A'}\nDifficulty: ${result.difficulty || 'N/A'}/10\n\n`;
 
   if (result.riffs && result.riffs.length > 0) { 
     const riffsWithTabs = result.riffs.filter((r: any) => r.tab && r.tab.trim() !== ''); 
@@ -127,4 +128,4 @@ export const generateTabsFromStem = async (username: string, taskId: string): Pr
   } 
 
   return formattedTabs; 
-}; 
+};

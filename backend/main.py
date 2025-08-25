@@ -208,7 +208,7 @@ def identify_song(req_body: IdentifyRequest):
     If you cannot determine the artist, use "Unknown Artist".
     """
     user_prompt = f"Filename: \"{req_body.rawFileName}\""
-    response_data = generate_text_from_prompt(system_prompt, user_prompt)
+    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
     try:
         json_text = response_data.get("text", "{}")
         if "```json" in json_text:
@@ -226,7 +226,7 @@ def get_initial_analysis(req_body: AnalysisRequest):
     Keep it concise and positive.
     """
     user_prompt = f"The song is \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
-    return generate_text_from_prompt(system_prompt, user_prompt)
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash") # Specify flash model
 
 @app.post("/gemini/playing-advice")
 def get_playing_advice(req_body: AdviceRequest):
@@ -241,7 +241,7 @@ def get_playing_advice(req_body: AdviceRequest):
         context_parts.append(f"They perceive the difficulty as {req_body.difficulty}/10.")
     context_parts.append(f"\nUser's question: \"{req_body.section}\"")
     user_prompt = "\n".join(context_parts)
-    return generate_text_from_prompt(system_prompt, user_prompt)
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
 
 @app.post("/gemini/generate-tabs")
 def generate_tabs(req_body: TabsRequest):
@@ -252,7 +252,7 @@ def generate_tabs(req_body: TabsRequest):
     Your output should be formatted as plain text suitable for a `<pre>` tag. Use markdown for code blocks.
     """
     user_prompt = f"Please generate tabs for \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
-    return generate_text_from_prompt(system_prompt, user_prompt)
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
 
 
 @app.post("/gemini/analyze-stem")
@@ -260,7 +260,6 @@ def analyze_stem_with_gemini(
     username: str = Form(...),
     task_id: str = Form(...),
     prompt: str = Form(""),
-    include_essentia: bool = Form(False),
 ):
     manifest_key = f"stems/{username}/{task_id}/manifest.json"
     try:
@@ -283,23 +282,33 @@ def analyze_stem_with_gemini(
             local_audio_path = tmp.name
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch stem: {e}")
+    
     extra_ctx = None
-    if include_essentia:
-        ess_key = f"stems/{username}/{task_id}/essentia.json"
-        try:
-            ess_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=ess_key)
-            extra_ctx = json.loads(ess_obj["Body"].read().decode("utf-8"))
-        except s3_client.exceptions.NoSuchKey:
-            extra_ctx = {"warning": "essentia.json not found"}
+    ess_key = f"stems/{username}/{task_id}/essentia.json"
     try:
-        result = analyze_guitar_file(local_audio_path, user_prompt=prompt, extra_context_json=extra_ctx)
+        ess_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=ess_key)
+        extra_ctx = json.loads(ess_obj["Body"].read().decode("utf-8"))
+    except s3_client.exceptions.NoSuchKey:
+        extra_ctx = {"warning": "essentia.json not found"}
+
+    try:
+        result = analyze_guitar_file(
+            local_audio_path,
+            model_name="gemini-2.5-flash",
+            user_prompt=prompt,
+            extra_context_json=extra_ctx
+        )
+        
+        if "error" in result:
+            raise Exception(result["error"])
+
         result_key = f"stems/{username}/{task_id}/gemini_analysis.json"
         s3_client.put_object(
             Bucket=BUCKET_NAME, Key=result_key,
             Body=json.dumps(result), ContentType="application/json", ACL="public-read"
         )
         return {"ok": True, "result": result,
-                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){result_key}"}
+                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
 

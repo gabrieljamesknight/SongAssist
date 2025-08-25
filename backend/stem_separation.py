@@ -5,6 +5,16 @@ import json
 from pathlib import Path
 import boto3
 
+try:
+    import essentia.standard as es
+except ImportError:
+    es = None
+    print("="*80)
+    print("WARNING: The 'essentia' library could not be imported.")
+    print("Audio analysis (BPM, Key) will be skipped. Please ensure it is installed.")
+    print("="*80)
+
+
 INPUT_DIR = Path(__file__).parent / "temp_uploads"
 OUTPUT_DIR = Path(__file__).parent / "separated_audio"
 INPUT_DIR.mkdir(exist_ok=True)
@@ -19,6 +29,32 @@ class DemucsSeparator:
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
         )
         self.aws_region = "eu-west-2"
+
+    def analyze_audio_with_essentia(self, file_path: str) -> dict:
+
+        if not es:
+            return {"error": "Essentia library not available."}
+        try:
+            loader = es.MonoLoader(filename=str(file_path))
+            audio = loader()
+            
+            rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
+            bpm, _, _, _, _ = rhythm_extractor(audio)
+
+            key_extractor = es.KeyExtractor()
+            key, scale, strength = key_extractor(audio)
+
+            analysis_data = {
+                "bpm": round(bpm, 2),
+                "key": key,
+                "scale": scale,
+                "key_strength": round(strength, 2)
+            }
+            print(f"Essentia analysis complete for {file_path}: {analysis_data}")
+            return analysis_data
+        except Exception as e:
+            print(f"Could not analyze audio with Essentia: {e}")
+            return {"error": str(e)}
 
     def get_audio_duration(self, file_path: str) -> float:
         """Gets the duration of an audio file in seconds using ffprobe."""
@@ -84,9 +120,13 @@ class DemucsSeparator:
 
             print(f"Uploading stems from {local_stems_dir} to S3 for user '{username}'...")
             # Upload guitar and no_guitar stems
+            guitar_stem_path = None
+
             for stem_name in ["guitar", "no_guitar"]:
                 local_file_path = local_stems_dir / f"{stem_name}.{output_extension}"
                 if local_file_path.exists():
+                    if stem_name == "guitar":
+                        guitar_stem_path = local_file_path
                     stem_key = f"stems/{username}/{task_id}/{stem_name}.{output_extension}"
                     # Add ACL and ContentType to make the file public
                     self.s3_client.upload_file(
@@ -101,6 +141,21 @@ class DemucsSeparator:
                 stem_urls["backingTrack"] = stem_urls.pop("no_guitar")
 
             # Create and upload the manifest.json 
+            if guitar_stem_path:
+                essentia_data = self.analyze_audio_with_essentia(str(guitar_stem_path))
+                if "error" not in essentia_data:
+                    essentia_key = f"stems/{username}/{task_id}/essentia.json"
+                    self.s3_client.put_object(
+                        Bucket=bucket_name,
+                        Key=essentia_key,
+                        Body=json.dumps(essentia_data),
+                        ContentType='application/json',
+                        ACL='public-read' 
+                    )
+                    print(f"Uploaded Essentia analysis to S3: {essentia_key}")
+                else:
+                    print(f"Skipping Essentia JSON upload due to analysis error for task {task_id}.")
+
             manifest_content = {
                 "stems": stem_urls,
                 "originalFileName": original_filename
