@@ -10,7 +10,7 @@ import BookmarkList from './components/BookmarkList';
 import { LoginScreen } from './components/LoginScreen';
 import { ProjectList } from './components/ProjectList';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice, generateTabs, identifySongFromFileName } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, generateTabsFromStem, identifySongFromFileName } from './services/geminiService';
 
 const App: FC = () => {
     const player = useAudioPlayer();
@@ -373,20 +373,20 @@ const App: FC = () => {
         }
     }, [player.song]);
 
-    const handleGenerateTabs = useCallback(async () => { 
-        if (!player.song) return;
+const handleGenerateTabs = useCallback(async () => { 
+        if (!player.song || !currentUser || !taskId) return;
         setIsTabGeneratorLoading(true);
         setTabGeneratorError(null);
         setTabs(null);
         try {
-            const responseText = await generateTabs(player.song.name, player.song.artist);
+            const responseText = await generateTabsFromStem(currentUser, taskId);
             setTabs(responseText);
-        } catch (error) {
-            setTabGeneratorError("An error occurred while generating tabs. Please try again.");
+        } catch (error: any) {
+            setTabGeneratorError(error.message || "An error occurred while generating tabs. Please try again.");
         } finally {
             setIsTabGeneratorLoading(false);
         }
-    }, [player.song]);
+    }, [player.song, currentUser, taskId]);
 
     const handleIsolationChange = (isolation: StemIsolation) => {
         setActiveIsolation(isolation);

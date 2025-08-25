@@ -17,6 +17,8 @@ import shutil
 from fastapi import Query
 from gemini_client import analyze_guitar_file, generate_text_from_prompt
 import requests
+import tempfile
+import urllib.parse
 
 from stem_separation import DemucsSeparator
 
@@ -185,18 +187,18 @@ def get_project_manifest(username: str, task_id: str):
         print(f"Error fetching manifest for user '{username}', task '{task_id}': {e}")
         raise HTTPException(status_code=500, detail="Could not fetch project manifest.")
 
-@app.get("/project/{username}/{task_id}/bookmarks") # Added to support bookmarks loading via proxy
-def get_project_bookmarks(username: str, task_id: str): # Added to support bookmarks loading via proxy
-    bookmarks_key = f"stems/{username}/{task_id}/bookmarks.json" # Added to support bookmarks loading via proxy
-    try: # Added to support bookmarks loading via proxy
-        bookmarks_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=bookmarks_key) # Added to support bookmarks loading via proxy
-        bookmarks_data = json.loads(bookmarks_obj['Body'].read().decode('utf-8')) # Added to support bookmarks loading via proxy
-        return JSONResponse(content=bookmarks_data) # Added to support bookmarks loading via proxy
-    except s3_client.exceptions.NoSuchKey: # Added to support bookmarks loading via proxy
-        return JSONResponse(content=[], status_code=404) # Added to support bookmarks loading via proxy
-    except Exception as e: # Added to support bookmarks loading via proxy
-        print(f"Error fetching bookmarks for user '{username}', task '{task_id}': {e}") # Added to support bookmarks loading via proxy
-        raise HTTPException(status_code=500, detail="Could not fetch project bookmarks.") # Added to support bookmarks loading via proxy
+@app.get("/project/{username}/{task_id}/bookmarks") 
+def get_project_bookmarks(username: str, task_id: str): 
+    bookmarks_key = f"stems/{username}/{task_id}/bookmarks.json" 
+    try: 
+        bookmarks_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=bookmarks_key) 
+        bookmarks_data = json.loads(bookmarks_obj['Body'].read().decode('utf-8')) 
+        return JSONResponse(content=bookmarks_data) 
+    except s3_client.exceptions.NoSuchKey: 
+        return JSONResponse(content=[], status_code=404) 
+    except Exception as e: 
+        print(f"Error fetching bookmarks for user '{username}', task '{task_id}': {e}") 
+        raise HTTPException(status_code=500, detail="Could not fetch project bookmarks.") 
 
 @app.post("/gemini/identify-from-filename")
 def identify_song(req_body: IdentifyRequest):
@@ -271,7 +273,10 @@ def analyze_stem_with_gemini(
     if not guitar_url:
         raise HTTPException(status_code=400, detail="Guitar stem not found in manifest.")
     try:
-        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tmp:
+        parsed_url = urllib.parse.urlparse(guitar_url)
+        file_extension = Path(parsed_url.path).suffix or ".mp3"
+        
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp:
             r = requests.get(guitar_url, timeout=60)
             r.raise_for_status()
             tmp.write(r.content)
