@@ -7,6 +7,7 @@ import boto3
 
 try:
     import essentia.standard as es
+    from essentia import Pool
 except ImportError:
     es = None
     print("="*80)
@@ -31,32 +32,87 @@ class DemucsSeparator:
         self.aws_region = "eu-west-2"
 
     def analyze_audio_with_essentia(self, file_path: str) -> dict:
-
         if not es:
             return {"error": "Essentia library not available."}
         try:
-            loader = es.MonoLoader(filename=str(file_path))
+            loader = es.MonoLoader(filename=str(file_path), sampleRate=44100)
             audio = loader()
+            sample_rate = 44100
+            if len(audio) < sample_rate * 2:
+                return {"error": "Audio file is too short for analysis."}
             
             rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-            bpm, _, _, _, _ = rhythm_extractor(audio)
-
+            bpm, beats, _, _, _ = rhythm_extractor(audio)
+            
             key_extractor = es.KeyExtractor()
             key, scale, strength = key_extractor(audio)
 
+            progression = []
+            segments = []
+            
+            try:
+                frame_size = 4096
+                hop_size = 2048
+                
+                window = es.Windowing(type='hann')
+                spectrum = es.Spectrum()
+                spectral_peaks = es.SpectralPeaks(orderBy='magnitude', magnitudeThreshold=0.00001, minFrequency=20, maxFrequency=3500, maxPeaks=60)
+                hpcp_extractor = es.HPCP(size=12, referenceFrequency=440, bandPreset=False, minFrequency=20, maxFrequency=3500)
+                chords_estimator = es.ChordsDetection()
+                
+                chords_list = []
+                hpcp_pool = Pool()
+                
+                for frame in es.FrameGenerator(audio, frameSize=frame_size, hopSize=hop_size, startFromZero=True):
+                    win_frame = window(frame)
+                    spec = spectrum(win_frame)
+                    freqs, mags = spectral_peaks(spec)
+                    hpcp = hpcp_extractor(freqs, mags)
+                    hpcp_pool.add('tonal.hpcp', hpcp)
+                    chord, _ = chords_estimator(hpcp)
+                    chords_list.append(chord)
+                    
+                if chords_list:
+                    current_chord = "N"
+                    for i, chord in enumerate(chords_list):
+                        if chord != current_chord:
+                            current_chord = chord
+                            current_time = i * hop_size / sample_rate
+                            if not progression or progression[-1]["chord"] != current_chord:
+                                progression.append({"time": round(current_time, 2), "chord": current_chord})
+
+                if hpcp_pool['tonal.hpcp'].shape[0] > 10:
+                    segmenter = es.SBic(cp=15, minLength=3)
+                    segment_boundaries_frames = segmenter(hpcp_pool['tonal.hpcp'])
+                    if len(segment_boundaries_frames) > 0:
+                        start_time = 0.0
+                        for i, boundary_frame in enumerate(segment_boundaries_frames):
+                            end_time = boundary_frame * hop_size / sample_rate
+                            segments.append({"start": round(start_time, 2), "end": round(end_time, 2), "label": f"Segment {i+1}"})
+                            start_time = end_time
+                        final_time = len(audio) / sample_rate
+                        segments.append({"start": round(start_time, 2), "end": round(final_time, 2), "label": f"Segment {len(segments)+1}"})
+
+            except Exception as frame_e:
+                print(f"Warning: Could not perform detailed chord/segment analysis: {frame_e}")
+                progression.append({"time": 0, "chord": "Analysis Failed"})
+            
             analysis_data = {
                 "bpm": round(bpm, 2),
+                "beats": [round(b, 2) for b in beats.tolist()],
                 "key": key,
                 "scale": scale,
-                "key_strength": round(strength, 2)
+                "key_strength": round(strength, 2),
+                "chord_progression": progression,
+                "segments": segments,
             }
-            print(f"Essentia analysis complete for {file_path}: {analysis_data}")
+            print(f"Essentia analysis complete for {file_path}")
             return analysis_data
         except Exception as e:
             print(f"Could not analyze audio with Essentia: {e}")
             return {"error": str(e)}
 
-    def get_audio_duration(self, file_path: str) -> float:
+    def get_audio_duration(self, file_path: str) -> float: # Added indentation
         """Gets the duration of an audio file in seconds using ffprobe."""
         try:
             command = [
@@ -70,7 +126,7 @@ class DemucsSeparator:
             print("Defaulting to safe segmentation for this file.")
             return 999.0
 
-    def separate_audio_stems(self, bucket_name: str, object_key: str, task_id: str, username: str, original_filename: str):
+    def separate_audio_stems(self, bucket_name: str, object_key: str, task_id: str, username: str, original_filename: str): # Added indentation
         
         local_input_path = INPUT_DIR / Path(object_key).name
         

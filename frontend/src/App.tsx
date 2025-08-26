@@ -9,6 +9,7 @@ import TabGenerator from './components/TabGenerator';
 import BookmarkList from './components/BookmarkList';
 import { LoginScreen } from './components/LoginScreen';
 import { ProjectList } from './components/ProjectList';
+import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
 import { getInitialSongAnalysis, getPlayingAdvice, generateTabsFromStem, identifySongFromFileName } from './services/geminiService';
 
@@ -29,6 +30,7 @@ const App: FC = () => {
     const [tabGeneratorError, setTabGeneratorError] = useState<string | null>(null);
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
+    const [confirmModalState, setConfirmModalState] = useState({ isOpen: false, taskIdToDelete: null as string | null });
     const isInitialMount = useRef(true);
     const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [debouncedSongForAnalysis, setDebouncedSongForAnalysis] = useState<Song | null>(null);
@@ -321,6 +323,39 @@ const App: FC = () => {
         }
     };
     
+    const handleDeleteProject = (taskIdToDelete: string) => {
+        if (!currentUser) {
+            setAppError("You must be logged in to delete a project.");
+            return;
+        }
+        setConfirmModalState({ isOpen: true, taskIdToDelete: taskIdToDelete });
+    };
+
+    const executeDeleteProject = async () => {
+        const { taskIdToDelete } = confirmModalState;
+        if (!currentUser || !taskIdToDelete) return;
+
+        try {
+            const response = await fetch(`${import.meta.env.VITE_API_BASE}/project/${currentUser}/${taskIdToDelete}`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Failed to delete the project.");
+            }
+
+            setUserProjects(currentProjects =>
+                currentProjects.filter(p => p.taskId !== taskIdToDelete)
+            );
+
+        } catch (error: any) {
+            setAppError(error.message || "An error occurred while deleting the project.");
+        } finally {
+            setConfirmModalState({ isOpen: false, taskIdToDelete: null });
+        }
+    };
+
     const handleDebouncedMetadataSave = useCallback((songToSave: Song) => {
         if (!currentUser || !taskId || songToSave.artist === 'Identifying...' || songToSave.artist === '...') {
             return;
@@ -373,7 +408,7 @@ const App: FC = () => {
         }
     }, [player.song]);
 
-const handleGenerateTabs = useCallback(async () => { 
+    const handleGenerateTabs = useCallback(async () => { 
         if (!player.song || !currentUser || !taskId) return;
         setIsTabGeneratorLoading(true);
         setTabGeneratorError(null);
@@ -413,7 +448,7 @@ const handleGenerateTabs = useCallback(async () => {
             );
         }
         
-        // Logged In, no song 
+       // Logged In, no song
         if (isUserLoading) {
              return (
                 <div className="max-w-2xl mx-auto mt-4">
@@ -438,6 +473,7 @@ const handleGenerateTabs = useCallback(async () => {
                                 handleLoadProject(proxyUrl, project.originalFileName);
                             }
                         }}
+                        onDeleteProject={handleDeleteProject}
                     />
                 </div>
             );
@@ -534,6 +570,14 @@ const handleGenerateTabs = useCallback(async () => {
                 
                 {renderContent()}
             </main>
+
+            <ConfirmationModal
+                isOpen={confirmModalState.isOpen}
+                onClose={() => setConfirmModalState({ isOpen: false, taskIdToDelete: null })}
+                onConfirm={executeDeleteProject}
+                title="Delete Project"
+                message="Are you sure you want to permanently delete this project? This action cannot be undone."
+            />
         </div>
     );
 };

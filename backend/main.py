@@ -382,6 +382,39 @@ def save_project_bookmarks(username: str, task_id: str, bookmarks: List[Bookmark
     except Exception as e:
         print(f"Error saving bookmarks for user '{username}', task '{task_id}': {e}")
         raise HTTPException(status_code=500, detail="Could not save bookmarks.")
+    
+@app.delete("/project/{username}/{task_id}", summary="Delete a project", status_code=200)
+def delete_project(username: str, task_id: str):
+    """
+    Deletes all files associated with a project from S3.
+    """
+    if not username or not task_id:
+        raise HTTPException(status_code=400, detail="Username and Task ID are required.")
+
+    prefix = f"stems/{username}/{task_id}/"
+    
+    try:
+        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+        
+        if 'Contents' not in response:
+            return {"message": "Project not found or already deleted."}
+
+        objects_to_delete = [{'Key': obj['Key']} for obj in response['Contents']]
+        
+        delete_response = s3_client.delete_objects(
+            Bucket=BUCKET_NAME,
+            Delete={'Objects': objects_to_delete}
+        )
+        
+        if 'Errors' in delete_response and len(delete_response['Errors']) > 0:
+            print(f"Errors deleting objects for project {task_id}: {delete_response['Errors']}")
+            raise HTTPException(status_code=500, detail="Error occurred during project deletion.")
+
+        return {"message": "Project deleted successfully."}
+
+    except Exception as e:
+        print(f"Unexpected error deleting project '{task_id}' for user '{username}': {e}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during project deletion.")
 
 
 @app.put("/{username}/{task_id}/metadata", summary="Update project metadata", status_code=200)
