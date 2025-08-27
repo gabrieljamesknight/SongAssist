@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, FC, useRef } from 'react';
-import { Song, Bookmark, ActiveView, ChatMessage, Stem, StemIsolation, Project } from './types';
-import { useAudioPlayer } from './hooks/useAudioPlayer';
+import { Song, Bookmark, ActiveView, ChatMessage, StemIsolation, Project } from './types';
+import { useAudioPlayerContext } from './contexts/AudioPlayerContext';
 import { FileUpload } from './components/FileUpload';
 import Player from './components/Player';
 import StemMixer from './components/StemMixer';
@@ -13,8 +13,10 @@ import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
 import { getInitialSongAnalysis, getPlayingAdvice, generateTabsFromStem, identifySongFromFileName } from './services/geminiService';
 
+
 const App: FC = () => {
-    const player = useAudioPlayer();
+
+    const player = useAudioPlayerContext();
     const [currentUser, setCurrentUser] = useState<string | null>(null);
     const [userProjects, setUserProjects] = useState<Project[]>([]);
     const [isUserLoading, setIsUserLoading] = useState<boolean>(false);
@@ -243,8 +245,6 @@ const App: FC = () => {
 
     const handleLoadProject = async (manifestUrl: string, originalFileName: string) => {
         setIsProjectLoading(true);
-        
-        player.setSong(null);
         setAppError(null);
         setBookmarks([]);
         setChatMessages([]);
@@ -386,7 +386,14 @@ const App: FC = () => {
     const handleAddBookmark = useCallback(() => setBookmarks(prev => [...prev, { id: Date.now(), time: player.currentTime, label: `Bookmark ${prev.length + 1}` }]), [player.currentTime]);
     const handleDeleteBookmark = useCallback((id: number) => setBookmarks(prev => prev.filter(b => b.id !== id)), []);
     const handleUpdateBookmarkLabel = useCallback((id: number, label: string) => setBookmarks(prev => prev.map(b => (b.id === id ? { ...b, label } : b))), []);
-    
+
+    const handleGoToBookmark = (time: number) => {
+        if (player.isLooping) {
+            player.onLoopChange(null);
+        }
+        player.seek(time);
+    };
+
     const handleSendMessage = useCallback(async (query: string) => { 
         if (!player.song) return;
         const userMessage: ChatMessage = { role: 'user', content: query };
@@ -489,12 +496,17 @@ const App: FC = () => {
                             isPlaying={player.isPlaying}
                             currentTime={player.currentTime}
                             playbackSpeed={player.playbackSpeed}
+                            loop={player.loop}
+                            isLooping={player.isLooping}
+                            allowLoopCreation={!player.loop && !player.savedLoop}
                             onPlayPause={handlePlayPause}
                             onSeek={player.seek}
                             onSpeedChange={player.setPlaybackSpeed}
                             onAddBookmark={handleAddBookmark}
                             onSongNameChange={handleSongNameChange}
                             onArtistNameChange={handleArtistNameChange}
+                            onLoopChange={player.onLoopChange}
+                            onToggleLoop={player.onToggleLoop}
                         />
                         <StemMixer 
                             stemVolumes={player.stemVolumes} 
@@ -529,7 +541,7 @@ const App: FC = () => {
                                 <TabGenerator song={player.song} tabs={tabs} isLoading={isTabGeneratorLoading} error={tabGeneratorError} onGenerateTabs={handleGenerateTabs} />
                             </div>
                              <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'bookmarks' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={player.seek} />
+                                <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={handleGoToBookmark} />{/* Changed: Use new handler */}
                             </div>
                         </div>
                     </div>
@@ -552,7 +564,7 @@ const App: FC = () => {
                         
                         {player.song && (
                              <button onClick={handleBackToProjects} className="flex items-center gap-2 bg-gray-700 hover:bg-teal-800/50 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
                                 Projects
                             </button>
                         )}

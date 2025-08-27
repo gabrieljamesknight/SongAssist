@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Stem, Song } from '../types';
 
+export type AudioPlayerOptions = {
+    loop: { start: number; end: number; } | null;
+    isLooping: boolean;
+};
+
 export type AudioPlayerControls = {
     song: Song | null;
     isPlaying: boolean;
@@ -18,7 +23,8 @@ export type AudioPlayerControls = {
     setSong: React.Dispatch<React.SetStateAction<Song | null>>;
 };
 
-export const useAudioPlayer = (): AudioPlayerControls => {
+export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls => {
+    const { loop, isLooping } = options;
     const [song, setSong] = useState<Song | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -183,7 +189,8 @@ export const useAudioPlayer = (): AudioPlayerControls => {
             setSong({ 
                 ...songDetails, 
                 duration: decodedGuitar.duration,
-                artistConfirmed: false 
+                artistConfirmed: false,
+                stemUrls: stemUrls,
             });
         } catch (err) {
             console.error(err);
@@ -217,8 +224,10 @@ export const useAudioPlayer = (): AudioPlayerControls => {
                 const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
                 // Total time is the time before this segment + time elapsed in this segment
                 const newCurrentTime = playbackStateRef.current.pausedAt + elapsed;
-
-                if (newCurrentTime < song.duration) {
+                
+                if (isLooping && loop && newCurrentTime >= loop.end) {
+                    seek(loop.start);
+                } else if (newCurrentTime < song.duration) {
                     setCurrentTime(newCurrentTime);
                 } else {
                     // Song finished
@@ -236,7 +245,7 @@ export const useAudioPlayer = (): AudioPlayerControls => {
         }
         
         return () => cancelAnimationFrame(animationFrameId);
-    }, [isPlaying, song?.duration, stopPlayback]);
+    }, [isPlaying, song?.duration, stopPlayback, loop, isLooping, seek]);
 
     return { 
         song, 

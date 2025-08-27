@@ -5,10 +5,16 @@ from typing import Optional, Dict, Any
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-PROMPT_BASE = PROMPT_BASE = """You are a guitar analysis AI.
-Analyze the provided guitar audio stem and return ONLY a single JSON object.
-You will be provided with pre-analyzed musical data in an "Extra analysis data (JSON)" object. Prioritize this data for fields like 'key' and 'bpm'.
-Use the audio file primarily to generate tablature for the identified riffs and sections. If the provided JSON data appears to contradict the audio, mention this discrepancy in the 'notes' field.
+PROMPT_BASE = """You are a guitar analysis AI.
+Analyze the provided guitar audio stem and supplemental JSON data to return ONLY a single JSON object.
+
+The supplemental JSON data contains:
+1. "bpm": The song's tempo.
+2. "key": The song's musical key.
+3. "chord_progression": A list of chords identified in the audio. 'm' denotes a minor chord, 'N/C' means 'No Chord' was confidently detected.
+
+Use the audio file for rhythmic and timbral details (like strumming patterns or distortion), but use the chord_progression to guide your harmonic analysis. Your primary task is to infer the tuning, difficulty, sections, and main riffs. Generate tablature for at least one or two key riffs.
+
 The JSON response should have this exact structure:
 {
   "tuning": "E Standard",
@@ -19,8 +25,6 @@ The JSON response should have this exact structure:
   "riffs": [{"start": 12.5, "end": 18.0, "description": "Main Riff", "tab": "e|--0--|\\nB|--0--|"}],
   "notes": "General analysis notes."
 }
-Be concise. Infer difficulty (1-10) and identify sections and key riffs with timestamps, descriptions, and ASCII tabs.
-If uncertain about a value not present in the extra data, use conservative values and explain in the 'notes' field.
 """
 
 def generate_text_from_prompt(system_prompt: str, user_prompt: str, model_name: str) -> Dict[str, Any]:
@@ -46,8 +50,8 @@ def analyze_guitar_file(local_audio_path: str,
     if user_prompt:
         parts.append({"text": f"User request: {user_prompt}"})
     if extra_context_json:
-        context_text = json.dumps(extra_context_json)[:50000]
-        parts.append({"text": f"Extra analysis data (JSON):\n{context_text}"})
+        context_text = json.dumps(extra_context_json)
+        parts.append({"text": f"Supplemental JSON Data:\n{context_text}"})
 
     parts.append(uploaded)
     

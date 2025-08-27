@@ -6,6 +6,7 @@ export interface Song {
   artist: string;
   duration: number;
   artistConfirmed: boolean;
+  stemUrls?: Record<string, string>;
 }
 
 export interface Bookmark {
