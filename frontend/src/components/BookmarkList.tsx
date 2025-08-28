@@ -1,4 +1,3 @@
-
 import type { FC } from 'react';
 import { Bookmark } from '../types';
 import { TrashIcon } from './Icons';
@@ -19,10 +18,12 @@ const formatTime = (seconds: number): string => {
 const BookmarkList: React.FC<BookmarkListProps> = ({ bookmarks, onDeleteBookmark, onUpdateBookmarkLabel, onGoToBookmark }) => {
   return (
     <div className="h-full flex flex-col">
-       <h3 className="text-xl font-bold text-white mb-4 flex-shrink-0">Bookmarks</h3>
-      {bookmarks.length === 0 ? (
+       <div className="flex justify-between items-center mb-4 flex-shrink-0">
+         <h3 className="text-xl font-bold text-white">Bookmarks</h3>
+       </div>
+      {(!Array.isArray(bookmarks) || bookmarks.length === 0) ? (
         <div className="flex-grow flex items-center justify-center text-gray-500">
-          <p>No bookmarks added yet.</p>
+          <p>No bookmarks yet.</p>
         </div>
       ) : (
         <ul className="space-y-3 overflow-y-auto flex-grow">

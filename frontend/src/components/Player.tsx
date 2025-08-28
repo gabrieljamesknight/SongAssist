@@ -1,7 +1,7 @@
 import { FC, memo, useRef, useEffect, useState } from 'react';
 import { Song } from '../types';
 import { PlayIcon, PauseIcon, RewindIcon, FastForwardIcon, BookmarkIcon } from './Icons';
-import JSZip from 'jszip'; // Added: Import JSZip for client-side file zipping.
+import JSZip from 'jszip';
 
 interface PlayerProps {
   song: Song;
@@ -105,9 +105,20 @@ const Player: React.FC<PlayerProps> = ({
     let dragType: 'start' | 'end' | 'new' | 'seek';
 
     if (loop) {
+      const handleWidthPixels = 12;
+      const handleWidthSeconds = (handleWidthPixels / sliderContainerRef.current.getBoundingClientRect().width) * song.duration;
       const distToStart = Math.abs(time - loop.start);
       const distToEnd = Math.abs(time - loop.end);
-      dragType = distToStart < distToEnd ? 'start' : 'end';
+
+      if (Math.min(distToStart, distToEnd) < handleWidthSeconds) {
+        dragType = distToStart < distToEnd ? 'start' : 'end';
+      } else if (allowLoopCreation) {
+        dragType = 'new';
+      }
+      else {
+        dragType = 'seek';
+      }
+
     } else if (allowLoopCreation) {
       dragType = 'new';
     } else {
@@ -134,21 +145,33 @@ const Player: React.FC<PlayerProps> = ({
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragStateRef.current?.isDragging) return;
-      const currentTime = calculateTimeFromEvent(e);
-      const minLoopDuration = 2; 
+      const timeFromCursor = calculateTimeFromEvent(e);
+      const minLoopDuration = 2;
 
       switch (dragStateRef.current.type) {
         case 'new':
-          onLoopChange({ start: Math.min(dragStateRef.current.initialTime, currentTime), end: Math.max(dragStateRef.current.initialTime, currentTime) });
+          onLoopChange({ start: Math.min(dragStateRef.current.initialTime, timeFromCursor), end: Math.max(dragStateRef.current.initialTime, timeFromCursor) });
           break;
         case 'start':
-          if (loop) onLoopChange({ start: Math.min(currentTime, loop.end - minLoopDuration), end: loop.end }); 
+          if (loop) {
+            const newStart = Math.min(timeFromCursor, loop.end - minLoopDuration);
+            onLoopChange({ start: newStart, end: loop.end });
+            if (currentTime < newStart) {
+              onSeek(newStart);
+            }
+          }
           break;
         case 'end':
-          if (loop) onLoopChange({ start: loop.start, end: Math.max(currentTime, loop.start + minLoopDuration) });
+          if (loop) {
+            const newEnd = Math.max(timeFromCursor, loop.start + minLoopDuration);
+            onLoopChange({ start: loop.start, end: newEnd });
+            if (currentTime > newEnd) {
+              onSeek(newEnd);
+            }
+          }
           break;
         case 'seek':
-          onSeek(currentTime);
+          onSeek(timeFromCursor);
           break;
       }
     };
@@ -160,21 +183,7 @@ const Player: React.FC<PlayerProps> = ({
       const time = calculateTimeFromEvent(e);
 
       if (wasSimpleClick) {
-        if (loop) {
-          const distToStart = Math.abs(time - loop.start);
-          const distToEnd = Math.abs(time - loop.end);
-          const minLoopDuration = 2;
-
-          if (distToStart < distToEnd) {
-            const newStart = Math.min(time, loop.end - minLoopDuration);
-            onLoopChange({ start: newStart, end: loop.end });
-          } else {
-            const newEnd = Math.max(time, loop.start + minLoopDuration);
-            onLoopChange({ start: loop.start, end: newEnd });
-          }
-        } else {
-          onSeek(time);
-        }
+        onSeek(time);
       } else {
         if (loop && loop.end - loop.start < 2) { 
           onLoopChange(null);
@@ -194,7 +203,7 @@ const Player: React.FC<PlayerProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [loop, onLoopChange, onSeek, song.duration]);
+  }, [loop, onLoopChange, onSeek, song.duration, currentTime]);
   
   const handleDownload = (stem: 'guitar' | 'backingTrack') => {
     if (!song.stemUrls) return;

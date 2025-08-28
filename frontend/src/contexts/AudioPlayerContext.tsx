@@ -29,27 +29,38 @@ export const AudioPlayerProvider: FC<{children: ReactNode}> = ({ children }) => 
   };
 
   const handleToggleLoop = () => {
-    if (loop) {
-      setSavedLoop(loop);
-      setLoop(null);
-      setIsLooping(false);
-    } else {
-      if (savedLoop) {
-        setLoop(savedLoop);
-        setSavedLoop(null);
-        setIsLooping(true);
-        audioPlayer.seek(savedLoop.start);
-      } else if (audioPlayer.song && audioPlayer.song.duration > 10) {
-        const duration = audioPlayer.song.duration;
-        const middle = duration / 2;
-        const startTime = Math.max(0, middle - 5);
-        const endTime = Math.min(duration, middle + 5);
-        const newLoop = { start: startTime, end: endTime };
-        
-        setLoop(newLoop);
-        setIsLooping(true);
-        audioPlayer.seek(startTime);
-      }
+    // If looping is currently active turn it off
+    if (isLooping) {
+        if (loop) {
+            setSavedLoop(loop);
+        }
+        setLoop(null);
+        setIsLooping(false);
+    }
+    // Otherwise turn looping on
+    else {
+        const targetLoop = savedLoop || loop;
+        if (targetLoop) {
+            setLoop(targetLoop);
+            if (savedLoop) setSavedLoop(null);
+            setIsLooping(true);
+            audioPlayer.seek(targetLoop.start);
+        }
+        // If no loop exists at all create one and activate it
+        else if (audioPlayer.song && audioPlayer.song.duration > 10) {
+            const duration = audioPlayer.song.duration;
+            const middle = duration / 2;
+            const startTime = Math.max(0, middle - 5);
+            const endTime = Math.min(duration, middle + 5);
+            const newLoop = { start: startTime, end: endTime };
+            
+            setLoop(newLoop);
+            setIsLooping(true);
+            audioPlayer.seek(startTime);
+        }
+        else {
+             setIsLooping(true);
+        }
     }
   };
   

@@ -5,13 +5,13 @@ import { FileUpload } from './components/FileUpload';
 import Player from './components/Player';
 import StemMixer from './components/StemMixer';
 import { AIAssistant } from './components/AIAssistant';
-import TabGenerator from './components/TabGenerator';
+import ChordAnalysis from './components/ChordAnalysis';
 import BookmarkList from './components/BookmarkList';
 import { LoginScreen } from './components/LoginScreen';
 import { ProjectList } from './components/ProjectList';
 import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice, generateTabsFromStem, identifySongFromFileName } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName } from './services/geminiService';
 
 
 const App: FC = () => {
@@ -27,9 +27,9 @@ const App: FC = () => {
     const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [isAssistantLoading, setIsAssistantLoading] = useState(false);
-    const [tabs, setTabs] = useState<string | null>(null);
-    const [isTabGeneratorLoading, setIsTabGeneratorLoading] = useState(false);
-    const [tabGeneratorError, setTabGeneratorError] = useState<string | null>(null);
+    const [chordAnalysis, setChordAnalysis] = useState<string | null>(null);
+    const [isChordAnalysisLoading, setIsChordAnalysisLoading] = useState(false);
+    const [chordAnalysisError, setChordAnalysisError] = useState<string | null>(null);
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
     const [confirmModalState, setConfirmModalState] = useState({ isOpen: false, taskIdToDelete: null as string | null });
@@ -54,7 +54,7 @@ const App: FC = () => {
                 if (response.ok) {
                     clearInterval(poll);
                     clearTimeout(separationTimeout);
-                    
+
                     await fetchProjects(currentUser);
 
                     const data = await response.json();
@@ -105,7 +105,7 @@ const App: FC = () => {
         };
         fetchInitialAnalysis();
     }, [debouncedSongForAnalysis]);
-    
+
     useEffect(() => {
         if (isInitialMount.current) {
             isInitialMount.current = false;
@@ -148,15 +148,15 @@ const App: FC = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });
-            
+
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.detail || "Login failed.");
             }
-            
+
             // If login is successful, now fetch the projects
             await fetchProjects(username);
-        
+
         } catch (error: any) {
             setAppError(error.message || "Login failed. Please check your credentials and try again.");
             setCurrentUser(null);
@@ -165,7 +165,7 @@ const App: FC = () => {
             setIsUserLoading(false);
         }
     };
-    
+
     const handleRegister = async (username: string, password: string) => {
         setIsUserLoading(true);
         setAppError(null);
@@ -198,7 +198,7 @@ const App: FC = () => {
         player.setSong(null);
         setBookmarks([]);
         setChatMessages([]);
-        setTabs(null);
+        setChordAnalysis(null);
         setAppError(null);
         setTaskId(null);
         setActiveView('assistant');
@@ -211,11 +211,11 @@ const App: FC = () => {
         player.setSong(null);
         setBookmarks([]);
         setChatMessages([]);
-        setTabs(null);
+        setChordAnalysis(null);
         setAppError(null);
         setTaskId(null);
         setActiveView('assistant');
-        isInitialMount.current = true; 
+        isInitialMount.current = true;
     };
 
     const handleUploadSubmit = (originalFile: File, newTaskId: string) => {
@@ -225,11 +225,11 @@ const App: FC = () => {
         setTaskId(newTaskId);
         setChatMessages([]);
         setBookmarks([]);
-        setTabs(null);
+        setChordAnalysis(null);
         setActiveView('assistant');
         isInitialMount.current = true;
     };
-    
+
     const saveProjectMetadata = async (taskIdToSave: string, metadata: { songTitle: string; artist: string; }) => {
         if (!currentUser) return;
         try {
@@ -248,41 +248,45 @@ const App: FC = () => {
         setAppError(null);
         setBookmarks([]);
         setChatMessages([]);
-        setTabs(null);
+        setChordAnalysis(null);
         setActiveView('assistant');
         isInitialMount.current = true;
-    
+
         const urlParts = manifestUrl.split('/');
         const loadedTaskId = urlParts[urlParts.length - 2];
         setTaskId(loadedTaskId);
-    
+
         try {
             const response = await fetch(manifestUrl);
             if (!response.ok) {
                 throw new Error(`Manifest fetch failed with status: ${response.status}`);
             }
             const data = await response.json();
-    
-            let bookmarksData: Bookmark[] = [];
-            const bookmarksUrl = manifestUrl.replace(/\/manifest$/, '/bookmarks');
 
-            try {
-                const bookmarksResponse = await fetch(bookmarksUrl);
+            let bookmarksData: Bookmark[] = [];
+            const bookmarksUrl = manifestUrl.replace(/\/manifest\.json$/, '/bookmarks.json');
+
+        try {
+            const bookmarksResponse = await fetch(bookmarksUrl);
                 if (bookmarksResponse.ok) {
-                    bookmarksData = await bookmarksResponse.json();
+                    const loadedData = await bookmarksResponse.json();
+                    if (Array.isArray(loadedData)) {
+                        bookmarksData = loadedData;
+                    }
                 }
             } catch (bookmarkError) {
                 console.log("No existing bookmarks found for this project.");
             }
-    
+
+
             const nameWithoutExt = originalFileName.replace(/\.[^/.]+$/, '');
             const cleanedName = nameWithoutExt.replace(/^\d+[\s.-]*/, '');
-            
+
             await player.load(data.stems, { name: cleanedName, artist: '...' });
-            
+
             let finalTitle = cleanedName;
             let finalArtist = '';
-    
+
             if ('songTitle' in data && data.songTitle) {
                 finalTitle = data.songTitle;
                 finalArtist = data.artist || '';
@@ -290,29 +294,29 @@ const App: FC = () => {
             } else {
                 player.setSong(s => s ? { ...s, artist: 'Identifying...', artistConfirmed: false } : null);
                 const identification = await identifySongFromFileName(cleanedName);
-                
+
                 const identifiedTitle = identification?.songTitle || cleanedName;
                 const aiArtist = identification?.artist;
                 const identifiedArtist = (aiArtist && aiArtist.toLowerCase() !== 'unknown artist') ? aiArtist : '';
-    
+
                 finalTitle = identifiedTitle;
                 finalArtist = identifiedArtist;
-    
+
                 player.setSong(s => s ? { ...s, name: finalTitle, artist: finalArtist, artistConfirmed: false } : null);
-                
+
                 await saveProjectMetadata(loadedTaskId, { songTitle: finalTitle, artist: finalArtist });
             }
-            
+
             setBookmarks(bookmarksData);
-    
-            setUserProjects(currentProjects => 
-                currentProjects.map(p => 
-                    p.taskId === loadedTaskId 
-                        ? { ...p, originalFileName: finalTitle } 
+
+            setUserProjects(currentProjects =>
+                currentProjects.map(p =>
+                    p.taskId === loadedTaskId
+                        ? { ...p, originalFileName: finalTitle }
                         : p
                 )
             );
-    
+
         } catch (error) {
             console.error("Error in handleLoadProject:", error);
             setAppError("Failed to load the selected project.");
@@ -322,7 +326,7 @@ const App: FC = () => {
             setIsSeparating(false);
         }
     };
-    
+
     const handleDeleteProject = (taskIdToDelete: string) => {
         if (!currentUser) {
             setAppError("You must be logged in to delete a project.");
@@ -394,7 +398,7 @@ const App: FC = () => {
         player.seek(time);
     };
 
-    const handleSendMessage = useCallback(async (query: string) => { 
+    const handleSendMessage = useCallback(async (query: string) => {
         if (!player.song) return;
         const userMessage: ChatMessage = { role: 'user', content: query };
         setChatMessages(prev => [...prev, userMessage]);
@@ -415,18 +419,18 @@ const App: FC = () => {
         }
     }, [player.song]);
 
-    const handleGenerateTabs = useCallback(async () => { 
+    const handleAnalyzeChords = useCallback(async () => {
         if (!player.song || !currentUser || !taskId) return;
-        setIsTabGeneratorLoading(true);
-        setTabGeneratorError(null);
-        setTabs(null);
+        setIsChordAnalysisLoading(true);
+        setChordAnalysisError(null);
+        setChordAnalysis(null);
         try {
-            const responseText = await generateTabsFromStem(currentUser, taskId);
-            setTabs(responseText);
+            const responseText = await analyzeChordsFromStem(currentUser, taskId, player.song.name, player.song.artist); // Changed: Pass song title and artist
+            setChordAnalysis(responseText);
         } catch (error: any) {
-            setTabGeneratorError(error.message || "An error occurred while generating tabs. Please try again.");
+            setChordAnalysisError(error.message || "An error occurred while analyzing chords. Please try again.");
         } finally {
-            setIsTabGeneratorLoading(false);
+            setIsChordAnalysisLoading(false);
         }
     }, [player.song, currentUser, taskId]);
 
@@ -454,7 +458,7 @@ const App: FC = () => {
                 </div>
             );
         }
-        
+
        // Logged In, no song
         if (isUserLoading) {
              return (
@@ -491,14 +495,14 @@ const App: FC = () => {
             return (
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                     <div className="lg:col-span-3 space-y-8">
-                        <Player 
+                        <Player
                             song={player.song}
                             isPlaying={player.isPlaying}
                             currentTime={player.currentTime}
                             playbackSpeed={player.playbackSpeed}
                             loop={player.loop}
                             isLooping={player.isLooping}
-                            allowLoopCreation={!player.loop && !player.savedLoop}
+                            allowLoopCreation={player.isLooping} // Changed: Loop creation is now enabled only when loop mode is active.
                             onPlayPause={handlePlayPause}
                             onSeek={player.seek}
                             onSpeedChange={player.setPlaybackSpeed}
@@ -508,15 +512,15 @@ const App: FC = () => {
                             onLoopChange={player.onLoopChange}
                             onToggleLoop={player.onToggleLoop}
                         />
-                        <StemMixer 
-                            stemVolumes={player.stemVolumes} 
+                        <StemMixer
+                            stemVolumes={player.stemVolumes}
                             onVolumeChange={(stem, vol) => {
                                 player.setStemVolumes(v => ({...v, [stem]: vol}));
                                 setActiveIsolation('custom');
                             }}
                             activeIsolation={activeIsolation}
                             onIsolationChange={handleIsolationChange}
-                            isSeparating={isSeparating} 
+                            isSeparating={isSeparating}
                         />
                     </div>
                     <div className="lg:col-span-2 bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col min-h-[500px]">
@@ -526,7 +530,7 @@ const App: FC = () => {
                                     <BotIcon className="w-5 h-5"/> AI Assistant
                                 </button>
                                 <button onClick={() => setActiveView('tabs')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeView === 'tabs' ? 'border-teal-400 text-teal-300' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>
-                                    <FileTextIcon className="w-5 h-5"/> Tablature
+                                    <FileTextIcon className="w-5 h-5"/> Chords
                                 </button>
                                 <button onClick={() => setActiveView('bookmarks')} className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeView === 'bookmarks' ? 'border-teal-400 text-teal-300' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`}>
                                    <BookmarkIcon className="w-5 h-5"/> Bookmarks
@@ -538,10 +542,10 @@ const App: FC = () => {
                                 <AIAssistant song={player.song} messages={chatMessages} isLoading={isAssistantLoading} onSendMessage={handleSendMessage} />
                             </div>
                             <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'tabs' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                <TabGenerator song={player.song} tabs={tabs} isLoading={isTabGeneratorLoading} error={tabGeneratorError} onGenerateTabs={handleGenerateTabs} />
+                                <ChordAnalysis song={player.song} analysisResult={chordAnalysis} isLoading={isChordAnalysisLoading} error={chordAnalysisError} onAnalyzeChords={handleAnalyzeChords} />
                             </div>
                              <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'bookmarks' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={handleGoToBookmark} />{/* Changed: Use new handler */}
+                             <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={handleGoToBookmark} />
                             </div>
                         </div>
                     </div>
@@ -561,10 +565,10 @@ const App: FC = () => {
                 {currentUser && (
                     <div className="absolute top-0 right-0 flex items-center gap-4">
                         <span className="text-gray-300">Welcome, <strong className="font-semibold text-white">{currentUser}</strong></span>
-                        
+
                         {player.song && (
                              <button onClick={handleBackToProjects} className="flex items-center gap-2 bg-gray-700 hover:bg-teal-800/50 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
+                                <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
                                 Projects
                             </button>
                         )}
@@ -579,7 +583,7 @@ const App: FC = () => {
             <main className="max-w-7xl mx-auto">
                 {appError && <div className="bg-red-900/50 text-red-200 p-3 rounded-lg text-center mb-4">{appError}</div>}
                 {player.error && <div className="bg-red-900/50 text-red-200 p-3 rounded-lg text-center mb-4">{player.error}</div>}
-                
+
                 {renderContent()}
             </main>
 

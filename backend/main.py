@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -19,9 +19,9 @@ from gemini_client import analyze_guitar_file, generate_text_from_prompt
 import requests
 import tempfile
 import urllib.parse
+import subprocess
 
 from stem_separation import DemucsSeparator
-
 
 
 # Hashes using bcrypt algorithm
@@ -53,7 +53,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-separator = DemucsSeparator(model="htdemucs_6s")
+def get_separator():
+    return DemucsSeparator(s3_client=s3_client, model="htdemucs_6s")
 
 class Bookmark(BaseModel):
     id: int
@@ -83,6 +84,13 @@ class TabsRequest(BaseModel):
     songTitle: str
     artist: Optional[str] = None
 
+class StemAnalysisRequest(BaseModel):
+    username: str
+    task_id: str
+    songTitle: str
+    artist: Optional[str] = None
+    prompt: Optional[str] = ""
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password"""
@@ -92,7 +100,7 @@ def get_password_hash(password: str) -> str:
     """Generates a bcrypt hash"""
     return pwd_context.hash(password)
 
-def upload_and_separate(temp_file_path: str, object_key: str, task_id: str, username: str, original_filename: str):
+def upload_and_separate(temp_file_path: str, object_key: str, task_id: str, username: str, original_filename: str, separator: DemucsSeparator):
     """
     Background task that first uploads the file to S3, then starts separation
     """
@@ -226,7 +234,7 @@ def get_initial_analysis(req_body: AnalysisRequest):
     Keep it concise and positive.
     """
     user_prompt = f"The song is \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
-    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash") # Specify flash model
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
 
 @app.post("/gemini/playing-advice")
 def get_playing_advice(req_body: AdviceRequest):
@@ -241,7 +249,7 @@ def get_playing_advice(req_body: AdviceRequest):
         context_parts.append(f"They perceive the difficulty as {req_body.difficulty}/10.")
     context_parts.append(f"\nUser's question: \"{req_body.section}\"")
     user_prompt = "\n".join(context_parts)
-    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-1.5-flash")
 
 @app.post("/gemini/generate-tabs")
 def generate_tabs(req_body: TabsRequest):
@@ -252,16 +260,12 @@ def generate_tabs(req_body: TabsRequest):
     Your output should be formatted as plain text suitable for a `<pre>` tag. Use markdown for code blocks.
     """
     user_prompt = f"Please generate tabs for \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
-    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-pro")
 
 
 @app.post("/gemini/analyze-stem")
-def analyze_stem_with_gemini(
-    username: str = Form(...),
-    task_id: str = Form(...),
-    prompt: str = Form(""),
-):
-    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+def analyze_stem_with_gemini(req: StemAnalysisRequest): # Changed: Use Pydantic model instead of Form data
+    manifest_key = f"stems/{req.username}/{req.task_id}/manifest.json"
     try:
         obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
         manifest = json.loads(obj["Body"].read().decode("utf-8"))
@@ -271,53 +275,67 @@ def analyze_stem_with_gemini(
     guitar_url = stems.get("guitar") or stems.get("Guitar")
     if not guitar_url:
         raise HTTPException(status_code=400, detail="Guitar stem not found in manifest.")
+    
+    local_audio_path = None
+    truncated_audio_path = None
     try:
         parsed_url = urllib.parse.urlparse(guitar_url)
         file_extension = Path(parsed_url.path).suffix or ".mp3"
         
         with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp:
+            local_audio_path = tmp.name
             r = requests.get(guitar_url, timeout=60)
             r.raise_for_status()
             tmp.write(r.content)
-            local_audio_path = tmp.name
+        
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp_out:
+            truncated_audio_path = tmp_out.name
+
+        ffmpeg_command = [
+            "ffmpeg", "-y", "-i", local_audio_path,
+            "-t", "90", truncated_audio_path
+        ]
+        subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch stem: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch or process stem: {e}")
     
-    extra_ctx = None
-    ess_key = f"stems/{username}/{task_id}/essentia.json"
-    try:
-        ess_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=ess_key)
-        extra_ctx = json.loads(ess_obj["Body"].read().decode("utf-8"))
-    except s3_client.exceptions.NoSuchKey:
-        extra_ctx = {"warning": "essentia.json not found"}
 
     try:
+        extra_context = {"songTitle": req.songTitle, "artist": req.artist}
+        
         result = analyze_guitar_file(
-            local_audio_path,
+            truncated_audio_path,
             model_name="gemini-2.5-flash",
-            user_prompt=prompt,
-            extra_context_json=extra_ctx
+            user_prompt=req.prompt,
+            extra_context_json=extra_context
         )
         
         if "error" in result:
             raise Exception(result["error"])
 
-        result_key = f"stems/{username}/{task_id}/gemini_analysis.json"
+        result_key = f"stems/{req.username}/{req.task_id}/gemini_analysis.json"
         s3_client.put_object(
             Bucket=BUCKET_NAME, Key=result_key,
             Body=json.dumps(result), ContentType="application/json", ACL="public-read"
         )
         return {"ok": True, "result": result,
-                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"}
+                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){result_key}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
+    finally:
+        if local_audio_path and os.path.exists(local_audio_path):
+            os.remove(local_audio_path)
+        if truncated_audio_path and os.path.exists(truncated_audio_path):
+            os.remove(truncated_audio_path)
 
 
 @app.post("/separate/", status_code=202)
 def separate_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    username: str = Form(...)
+    username: str = Form(...),
+    separator: DemucsSeparator = Depends(get_separator)
 ):
     if not file or not username:
         raise HTTPException(status_code=400, detail="No file or username provided.")
@@ -341,7 +359,8 @@ def separate_audio(
             object_key,
             task_id,
             username,
-            original_filename
+            original_filename,
+            separator
         )
         
         content = {

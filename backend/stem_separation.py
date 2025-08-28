@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import boto3
 import numpy as np
+import traceback
 
 try:
     import essentia.standard as es
@@ -13,7 +14,7 @@ except ImportError:
     es = None
     print("="*80)
     print("WARNING: The 'essentia' library could not be imported.")
-    print("Audio analysis (BPM, Key) will be skipped. Please ensure it is installed.")
+    print("Audio analysis (BPM, Key, Structure) will be skipped. Please ensure it is installed.")
     print("="*80)
 
 
@@ -23,66 +24,25 @@ INPUT_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 class DemucsSeparator:
-    def __init__(self, model: str = "htdemucs_6s"):
+    def __init__(self, s3_client, model: str = "htdemucs_s"):
         self.model = model
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
-        )
+        self.s3_client = s3_client
         self.aws_region = "eu-west-2"
 
-    def _identify_chords_from_hpcp(self, hpcp_vectors: list, interval_seconds: float) -> list:
-        if not hpcp_vectors:
-            return []
-
-        PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        
-        major_template = np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0])
-        minor_template = np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0])
-
-        templates = {}
-        for i, root in enumerate(PITCH_CLASSES):
-            templates[f"{root}"] = np.roll(major_template, i)
-            templates[f"{root}m"] = np.roll(minor_template, i)
-        
-        chords = []
-        template_names = list(templates.keys())
-        template_matrix = np.array(list(templates.values())).T
-
-        for hpcp_vector in hpcp_vectors:
-            try:
-                norm = np.linalg.norm(hpcp_vector)
-                if norm < 1e-6:
-                    chords.append("N/C")
-                    continue
-                
-                normalized_vector = hpcp_vector / norm
-            except (ValueError, TypeError):
-                chords.append("N/C")
-                continue
-
-            similarities = np.dot(normalized_vector, template_matrix)
-            best_match_index = np.argmax(similarities)
-            chords.append(template_names[best_match_index])
-
-        if not chords: 
-            return []
-
-        compressed_progression = []
-        current_run = {"start": 0.0, "chord": chords[0]}
-
-        for i in range(1, len(chords)):
-            if chords[i] != current_run["chord"]:
-                current_run["end"] = round(i * interval_seconds, 2)
-                compressed_progression.append(current_run)
-                current_run = {"start": round(i * interval_seconds, 2), "chord": chords[i]}
-
-        current_run["end"] = round(len(chords) * interval_seconds, 2)
-        compressed_progression.append(current_run)
-        
-        return compressed_progression
-
+    def _convert_numpy_types(self, obj):
+        """Recursively converts numpy types in a dictionary to native Python types."""
+        if isinstance(obj, dict):
+            return {k: self._convert_numpy_types(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(i) for i in obj]
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+    
     def analyze_audio_with_essentia(self, file_path: str) -> dict:
         if not es:
             return {"error": "Essentia library not available."}
@@ -91,7 +51,11 @@ class DemucsSeparator:
             audio = loader()
             sample_rate = 44100
 
-            max_duration_seconds = 180
+            if audio is None or len(audio) == 0:
+                print(f"Warning: Essentia's MonoLoader failed or returned empty audio for {file_path}.")
+                return {"error": "Audio file could not be loaded. It may be corrupt or in an unsupported format."}
+
+            max_duration_seconds = 300
             max_samples = int(max_duration_seconds * sample_rate)
             if len(audio) > max_samples:
                 audio = audio[:max_samples]
@@ -100,63 +64,32 @@ class DemucsSeparator:
                 return {"error": "Audio file is too short for analysis."}
             
             rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
-            bpm, beats, _, _, _ = rhythm_extractor(audio)
+            bpm, _, _, _, _ = rhythm_extractor(audio)
             
             key_extractor = es.KeyExtractor()
             key, scale, strength = key_extractor(audio)
 
-            hpcp_vectors = []
-            interval_seconds = 2.0
-            
-            try:
-                frame_size = 4096
-                hop_size = 2048
-                
-                window = es.Windowing(type='hann')
-                spectrum = es.Spectrum()
-                spectral_peaks = es.SpectralPeaks(orderBy='magnitude', magnitudeThreshold=0.00001, minFrequency=80, maxFrequency=3500, maxPeaks=60)
-                hpcp_extractor = es.HPCP(size=12, referenceFrequency=440)
-
-                seconds_per_frame = hop_size / sample_rate
-                frames_per_window = int(interval_seconds / seconds_per_frame)
-
-                all_hpcps = []
-                for frame in es.FrameGenerator(audio, frameSize=frame_size, hopSize=hop_size, startFromZero=True):
-                    try:
-                        win_frame = window(frame)
-                        spec = spectrum(win_frame)
-                        freqs, mags = spectral_peaks(spec)
-                        if not np.any(mags): continue
-                        hpcp = hpcp_extractor(freqs, mags)
-                        all_hpcps.append(hpcp)
-                    except Exception:
-                        continue
-
-                if all_hpcps:
-                    for i in range(0, len(all_hpcps), frames_per_window):
-                        chunk = all_hpcps[i:i+frames_per_window]
-                        if not chunk: continue
-                        
-                        avg_hpcp = np.mean(np.array(chunk, dtype=np.float32), axis=0)
-                        hpcp_vectors.append(avg_hpcp)
-
-            except Exception as e:
-                print(f"Warning: Could not perform harmonic analysis: {e}")
-            
-            chord_progression = self._identify_chords_from_hpcp(hpcp_vectors, interval_seconds)
-            
-            if not chord_progression and len(audio) > 0:
-                duration = len(audio) / sample_rate
-                chord_progression = [{"start": 0.0, "end": round(duration, 2), "chord": "N/C"}]
-            
             analysis_data = {
-                "bpm": round(bpm, 2),
+                "bpm": bpm,
                 "key": f"{key} {scale}",
-                "key_strength": round(strength, 2),
-                "chord_progression": chord_progression
+                "key_strength": strength,
             }
+            
+            converted_data = self._convert_numpy_types(analysis_data)
+            
+            bpm_val = converted_data.get('bpm')
+            if isinstance(bpm_val, list) and bpm_val:
+                bpm_val = bpm_val[0]
+
+            strength_val = converted_data.get('key_strength')
+            if isinstance(strength_val, list) and strength_val:
+                strength_val = strength_val[0]
+
+            converted_data['bpm'] = round(float(bpm_val), 2) if bpm_val is not None else 0.0
+            converted_data['key_strength'] = round(float(strength_val), 2) if strength_val is not None else 0.0
+
             print(f"Essentia analysis complete for {file_path}")
-            return analysis_data
+            return converted_data
         except Exception as e:
             print(f"Could not analyze audio with Essentia: {e}")
             return {"error": str(e)}
@@ -203,26 +136,16 @@ class DemucsSeparator:
             content_type = f"audio/{output_extension}"
             print(f"Uploading stems from {local_stems_dir} to S3 for user '{username}'...")
             # Upload guitar and no_guitar stems
-            guitar_stem_path = None
             for stem_name in ["guitar", "no_guitar"]:
                 local_file_path = local_stems_dir / f"{stem_name}.{output_extension}"
                 if local_file_path.exists():
-                    if stem_name == "guitar":
-                        guitar_stem_path = local_file_path
                     stem_key = f"stems/{username}/{task_id}/{stem_name}.{output_extension}"
-                    # Add ACL and ContentType to make the file public
                     self.s3_client.upload_file(str(local_file_path), bucket_name, stem_key, ExtraArgs={'ACL': 'public-read', 'ContentType': content_type})
                     stem_urls[stem_name] = f"{base_url}/{stem_key}"
+
             if "no_guitar" in stem_urls:
                 stem_urls["backingTrack"] = stem_urls.pop("no_guitar")
-            if guitar_stem_path:
-                essentia_data = self.analyze_audio_with_essentia(str(guitar_stem_path))
-                if "error" not in essentia_data:
-                    essentia_key = f"stems/{username}/{task_id}/essentia.json"
-                    self.s3_client.put_object(Bucket=bucket_name, Key=essentia_key, Body=json.dumps(essentia_data), ContentType='application/json', ACL='public-read')
-                    print(f"Uploaded Essentia analysis to S3: {essentia_key}")
-                else:
-                    print(f"Skipping Essentia JSON upload due to analysis error for task {task_id}.")
+
             manifest_content = {"stems": stem_urls, "originalFileName": original_filename}
             manifest_key = f"stems/{username}/{task_id}/manifest.json"
             self.s3_client.put_object(Bucket=bucket_name, Key=manifest_key, Body=json.dumps(manifest_content), ContentType='application/json', ACL='public-read')
