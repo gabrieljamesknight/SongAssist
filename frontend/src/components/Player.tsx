@@ -351,10 +351,17 @@ const Player: React.FC<PlayerProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center justify-center pt-4">
+<div className="flex items-center justify-center pt-4">
         <div className="w-full sm:w-auto flex flex-col items-center space-y-2">
             <span className="text-sm font-medium text-gray-300">Playback Speed</span>
             <div className="flex items-center space-x-3">
+                <button
+                    onClick={() => onSpeedChange(0.8)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg h-10 px-4 flex items-center justify-center transition text-sm"
+                    aria-label="Set playback speed to 0.8x"
+                >
+                    0.8x
+                </button>
                 <button
                     onClick={() => onSpeedChange(Math.max(0.5, Number((playbackSpeed - 0.1).toFixed(2))))}
                     className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
@@ -371,6 +378,13 @@ const Player: React.FC<PlayerProps> = ({
                     disabled={playbackSpeed >= 2.0}
                 >
                     +
+                </button>
+                <button
+                    onClick={() => onSpeedChange(1.2)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg h-10 px-4 flex items-center justify-center transition text-sm"
+                    aria-label="Set playback speed to 1.2x"
+                >
+                    1.2x
                 </button>
             </div>
         </div>

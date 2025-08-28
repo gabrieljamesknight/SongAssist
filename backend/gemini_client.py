@@ -8,10 +8,11 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is to provide the most accurate and commonly accepted chord progression for a given song, broken down by musical section.
 **Analysis Process:**
 1.  **Identify the Song:** From the supplemental JSON data, determine the song's title and artist.
-2.  **Consult Knowledge Base:** Access your extensive knowledge of popular music to find the standard chords for this song. This is your primary source of information.
-3.  **Structure the Song:** Identify the main sections of the song (e.g., Intro, Verse, Chorus, Bridge). Use the provided audio to help verify the sequence of these sections.
-4.  **Format the Output:** Respond ONLY with a single JSON object with the exact structure specified below. Do not include timestamps.
+2.  **Consult Knowledge Base:** Access your extensive knowledge of popular music (such as chords from websites like Ultimate Guitar Tabs) to find the standard chords for this song. Pay close attention to the order of the chords within the progression. This is your primary source of information. Attempt to find the lyrics as well where possible.
+3.  **Structure the Song:** Identify the main sections of the song (e.g., Intro, Verse, Chorus, Bridge). Use the provided audio to help verify the sequence of these sections. Align the chords with lyrics but only when you are 100% sure you have the correct lyrics.
+4.  **Format the Output:** Respond ONLY with a single JSON object with the exact structure specified below. Do not include timestamps. Only include capo details if it's relevant or the most common way of playing the song.
 
+(Ignore all chords in this output structure they are example chords only. Only use your knowledge base to draw the chords from.)
 **JSON Output Structure:**
 {
   "tuning": "E Standard (Capo 2nd Fret)",
@@ -53,7 +54,6 @@ def analyze_guitar_file(local_audio_path: str,
     parts.append({"text": PROMPT_BASE})
     if user_prompt:
         parts.append({"text": f"User request: {user_prompt}"})
-    
     if extra_context_json:
         context_text = json.dumps(extra_context_json)
         parts.append({"text": f"Supplemental JSON Data:\n{context_text}"})
@@ -69,24 +69,21 @@ def analyze_guitar_file(local_audio_path: str,
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
     }
 
+    resp = model.generate_content(parts, generation_config=config, safety_settings=safety_settings)
+
+    if not resp.candidates or resp.candidates[0].finish_reason.name != "STOP":
+        reason = resp.candidates[0].finish_reason.name if resp.candidates else "NO_RESPONSE"
+        print(f"Gemini analysis terminated with reason: {reason}")
+        return {"error": f"Analysis terminated unexpectedly. Reason: {reason}. This can be intermittent, please try again."}
+
+    text = resp.text or ""
+
     try:
-        resp = model.generate_content(parts, generation_config=config, safety_settings=safety_settings)
-
-        if not resp.candidates or resp.candidates[0].finish_reason.name != "STOP":
-            reason = resp.candidates[0].finish_reason.name if resp.candidates else "NO_RESPONSE"
-            print(f"Gemini analysis terminated with reason: {reason}")
-            return {"error": f"Analysis terminated unexpectedly. Reason: {reason}. This can be intermittent, please try again."}
-
-        text = resp.text or ""
-        
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            json_str = text[start:end+1]
-            return json.loads(json_str)
-        else:
-            return {"notes": "Model response could not be parsed as JSON.", "raw": text}
+            return json.loads(text[start:end+1])
+    except Exception:
+        pass
 
-    except Exception as e:
-        print(f"Error during Gemini analysis or JSON parsing: {e}")
-        return {"error": f"An error occurred during AI analysis: {e}"}
+    return {"notes": "Model response could not be parsed as JSON.", "raw": text}

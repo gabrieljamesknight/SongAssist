@@ -188,6 +188,19 @@ def get_project_manifest(username: str, task_id: str):
     try:
         manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
         manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+
+        # Check if a Gemini analysis file exists
+        analysis_key = f"stems/{username}/{task_id}/gemini_analysis.json"
+        try:
+            s3_client.head_object(Bucket=BUCKET_NAME, Key=analysis_key)
+            manifest_data['analysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{analysis_key}"
+        except s3_client.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                # File doesn't exist
+                pass
+            else:
+                raise
+        
         return JSONResponse(content=manifest_data)
     except s3_client.exceptions.NoSuchKey:
         raise HTTPException(status_code=404, detail="Manifest not yet available.")
@@ -216,7 +229,7 @@ def identify_song(req_body: IdentifyRequest):
     If you cannot determine the artist, use "Unknown Artist".
     """
     user_prompt = f"Filename: \"{req_body.rawFileName}\""
-    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-1.5-flash")
     try:
         json_text = response_data.get("text", "{}")
         if "```json" in json_text:
@@ -249,7 +262,7 @@ def get_playing_advice(req_body: AdviceRequest):
         context_parts.append(f"They perceive the difficulty as {req_body.difficulty}/10.")
     context_parts.append(f"\nUser's question: \"{req_body.section}\"")
     user_prompt = "\n".join(context_parts)
-    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-1.5-flash")
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
 
 @app.post("/gemini/generate-tabs")
 def generate_tabs(req_body: TabsRequest):
@@ -260,11 +273,11 @@ def generate_tabs(req_body: TabsRequest):
     Your output should be formatted as plain text suitable for a `<pre>` tag. Use markdown for code blocks.
     """
     user_prompt = f"Please generate tabs for \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
-    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-pro")
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
 
 
 @app.post("/gemini/analyze-stem")
-def analyze_stem_with_gemini(req: StemAnalysisRequest): # Changed: Use Pydantic model instead of Form data
+def analyze_stem_with_gemini(req: StemAnalysisRequest):
     manifest_key = f"stems/{req.username}/{req.task_id}/manifest.json"
     try:
         obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
@@ -320,7 +333,7 @@ def analyze_stem_with_gemini(req: StemAnalysisRequest): # Changed: Use Pydantic 
             Body=json.dumps(result), ContentType="application/json", ACL="public-read"
         )
         return {"ok": True, "result": result,
-                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){result_key}"}
+                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
     finally:

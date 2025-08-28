@@ -11,7 +11,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ProjectList } from './components/ProjectList';
 import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName, formatChordAnalysis } from './services/geminiService';
 
 
 const App: FC = () => {
@@ -243,7 +243,7 @@ const App: FC = () => {
         }
     };
 
-    const handleLoadProject = async (manifestUrl: string, originalFileName: string) => {
+const handleLoadProject = async (manifestUrl: string, originalFileName: string) => {
         setIsProjectLoading(true);
         setAppError(null);
         setBookmarks([]);
@@ -262,6 +262,19 @@ const App: FC = () => {
                 throw new Error(`Manifest fetch failed with status: ${response.status}`);
             }
             const data = await response.json();
+
+            if (data.analysisUrl) {
+                try {
+                    const analysisResponse = await fetch(data.analysisUrl);
+                    if (analysisResponse.ok) {
+                        const analysisJson = await analysisResponse.json();
+                        const formattedAnalysis = formatChordAnalysis(analysisJson);
+                        setChordAnalysis(formattedAnalysis);
+                    }
+                } catch (analysisError) {
+                    console.error("Failed to load existing chord analysis:", analysisError);
+                }
+            }
 
             let bookmarksData: Bookmark[] = [];
             const bookmarksUrl = manifestUrl.replace(/\/manifest\.json$/, '/bookmarks.json');

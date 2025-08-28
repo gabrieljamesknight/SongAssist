@@ -20,7 +20,7 @@ const ChordAnalysis: React.FC<ChordAnalysisProps> = ({ song, analysisResult, isL
   if (!song) {
     return (
       <div className="h-full flex items-center justify-center text-gray-500">
-        <p>Upload a song to analyze its chords.</p> // Changed: Updated text
+        <p>Upload a song to analyze its chords.</p>
       </div>
     );
   }
@@ -46,10 +46,15 @@ const ChordAnalysis: React.FC<ChordAnalysisProps> = ({ song, analysisResult, isL
           </div>
         )}
       </div>
+       {analysisResult && (
+        <p className="text-xs text-gray-500 text-center mt-3 px-2">
+          Results are AI-generated and may be inaccurate.
+        </p>
+      )}
        <button
         onClick={handleAnalyzeChords}
         disabled={isLoading}
-        className="w-full mt-4 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
+        className="w-full mt-3 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
       >
         {isLoading ? 'Analyzing...' : `Analyze Chords for "${song.name}"`}
       </button>
