@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -58,7 +58,8 @@ def get_separator():
 
 class Bookmark(BaseModel):
     id: int
-    time: float
+    start: float
+    end: float
     label: str
 
 class SongMetadata(BaseModel):
@@ -188,20 +189,9 @@ def get_project_manifest(username: str, task_id: str):
     try:
         manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
         manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
-
-        # Check if a Gemini analysis file exists
-        analysis_key = f"stems/{username}/{task_id}/gemini_analysis.json"
-        try:
-            s3_client.head_object(Bucket=BUCKET_NAME, Key=analysis_key)
-            manifest_data['analysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{analysis_key}"
-        except s3_client.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                # File doesn't exist
-                pass
-            else:
-                raise
         
         return JSONResponse(content=manifest_data)
+        
     except s3_client.exceptions.NoSuchKey:
         raise HTTPException(status_code=404, detail="Manifest not yet available.")
     except Exception as e:
@@ -229,7 +219,7 @@ def identify_song(req_body: IdentifyRequest):
     If you cannot determine the artist, use "Unknown Artist".
     """
     user_prompt = f"Filename: \"{req_body.rawFileName}\""
-    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-1.5-flash")
+    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
     try:
         json_text = response_data.get("text", "{}")
         if "```json" in json_text:
@@ -332,8 +322,16 @@ def analyze_stem_with_gemini(req: StemAnalysisRequest):
             Bucket=BUCKET_NAME, Key=result_key,
             Body=json.dumps(result), ContentType="application/json", ACL="public-read"
         )
-        return {"ok": True, "result": result,
-                "resultUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"}
+        
+        manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        manifest_data['analysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"
+        s3_client.put_object(
+            Bucket=BUCKET_NAME, Key=manifest_key,
+            Body=json.dumps(manifest_data), ContentType='application/json', ACL='public-read'
+        )
+        
+        return {"ok": True, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
     finally:
@@ -414,6 +412,49 @@ def save_project_bookmarks(username: str, task_id: str, bookmarks: List[Bookmark
     except Exception as e:
         print(f"Error saving bookmarks for user '{username}', task '{task_id}': {e}")
         raise HTTPException(status_code=500, detail="Could not save bookmarks.")
+
+@app.put("/{username}/{task_id}/analysis", summary="Save chord analysis", status_code=200)
+async def save_chord_analysis(username: str, task_id: str, request: Request):
+    """
+    Saves the user-edited or AI-generated formatted chord analysis as a text file
+    and updates the manifest to point to it.
+    """
+    if not username or not task_id:
+        raise HTTPException(status_code=400, detail="Username and Task ID are required.")
+
+    content = await request.body()
+    analysis_key = f"stems/{username}/{task_id}/user_analysis.md"
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=analysis_key,
+            Body=content,
+            ContentType='text/markdown',
+            ACL='public-read'
+        )
+        
+        try:
+            manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+            manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        except s3_client.exceptions.NoSuchKey:
+             raise HTTPException(status_code=404, detail="Project manifest not found to update.")
+
+        manifest_data['userAnalysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{analysis_key}"
+        
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=manifest_key,
+            Body=json.dumps(manifest_data),
+            ContentType='application/json',
+            ACL='public-read'
+        )
+
+        return {"message": "Analysis saved successfully."}
+    except Exception as e:
+        print(f"Error saving analysis for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not save analysis.")
     
 @app.delete("/project/{username}/{task_id}", summary="Delete a project", status_code=200)
 def delete_project(username: str, task_id: str):
@@ -506,7 +547,7 @@ def get_user_projects(username: str):
                 projects.append({
                     "taskId": task_id,
                     "originalFileName": display_name,
-                    "manifestUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}[.amazonaws.com/](https://.amazonaws.com/){manifest_key}"
+                    "manifestUrl": f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{manifest_key}"
                 })
             except s3_client.exceptions.NoSuchKey:
                 print(f"Warning: Manifest file not found for task {task_id} of user {username}")

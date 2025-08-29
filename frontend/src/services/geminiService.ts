@@ -12,6 +12,46 @@ function requireApiBase(): string {
   return API_BASE;
 }
 
+const formatWithChordsAbove = (text: string): string => {
+  if (!text || !text.includes('[')) {
+    return text;
+  }
+
+  return text
+    .split('\n')
+    .map(line => {
+      if (!line.includes('[')) return line;
+
+      const chords: { text: string; index: number }[] = [];
+      const regex = /\[([^\]]+)\]/g;
+      let match;
+      while ((match = regex.exec(line)) !== null) {
+        chords.push({ text: match[1], index: match.index });
+      }
+
+      if (chords.length === 0) return line;
+
+      const lyricLine = line.replace(/\[[^\]]+\]/g, '');
+      const chordLineChars = Array(lyricLine.length).fill(' ');
+
+      let offset = 0;
+      chords.forEach(chord => {
+        const pos = chord.index - offset;
+        if (pos >= 0) {
+            chord.text.split('').forEach((char, i) => {
+                if (pos + i < chordLineChars.length) {
+                    chordLineChars[pos + i] = char;
+                }
+            });
+        }
+        offset += chord.text.length + 2;
+      });
+
+      return `${chordLineChars.join('').trimEnd()}\n${lyricLine}`;
+    })
+    .join('\n');
+};
+
 
 export const formatChordAnalysis = (result: any): string => {
   let formattedOutput = `### AI Analysis\n\n`;
@@ -25,7 +65,7 @@ export const formatChordAnalysis = (result: any): string => {
           if (section.name && section.chords) {
             formattedOutput += `**${section.name}**\n`;
             formattedOutput += "```\n";
-            formattedOutput += `${section.chords}\n`;
+            formattedOutput += `${formatWithChordsAbove(section.chords)}\n`;
             formattedOutput += "```\n\n";
           }
       });
@@ -124,4 +164,23 @@ export const analyzeChordsFromStem = async (
   } 
 
   return formatChordAnalysis(data.result);
+};
+
+export const saveChordAnalysis = async (
+    username: string,
+    taskId: string,
+    content: string
+): Promise<void> => {
+  const base = requireApiBase();
+  const res = await fetch(`${base}/${username}/${taskId}/analysis`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/markdown' },
+    body: content,
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    console.error("save-analysis failed:", res.status, errorBody);
+    throw new Error('Failed to save chord analysis.');
+  }
 };

@@ -11,7 +11,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { ProjectList } from './components/ProjectList';
 import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
-import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName, formatChordAnalysis } from './services/geminiService';
+import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName, formatChordAnalysis, saveChordAnalysis } from './services/geminiService';
 
 
 const App: FC = () => {
@@ -118,7 +118,7 @@ const App: FC = () => {
 
         const saveBookmarks = async () => {
             try {
-                await fetch(`http://127.0.0.1:8000/${currentUser}/${taskId}/bookmarks`, {
+                await fetch(`${import.meta.env.VITE_API_BASE}/${currentUser}/${taskId}/bookmarks`, { // Use environment variable for API base
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(bookmarks),
@@ -249,6 +249,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
         setBookmarks([]);
         setChatMessages([]);
         setChordAnalysis(null);
+        setChordAnalysisError(null);
         setActiveView('assistant');
         isInitialMount.current = true;
 
@@ -263,24 +264,44 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
             }
             const data = await response.json();
 
-            if (data.analysisUrl) {
+            if (data.userAnalysisUrl) {
+                try {
+                    const userAnalysisResponse = await fetch(data.userAnalysisUrl);
+                    if (userAnalysisResponse.ok) {
+                        const userAnalysisText = await userAnalysisResponse.text();
+                        setChordAnalysis(userAnalysisText);
+                    } else {
+                        const errorMsg = `Failed to load saved chords (status: ${userAnalysisResponse.status}). This may be a CORS issue on the S3 bucket.`;
+                        console.error(errorMsg, "URL:", data.userAnalysisUrl);
+                        setChordAnalysisError(errorMsg);
+                    }
+                } catch (userAnalysisError) {
+                    console.error("Network error fetching user-edited chord analysis:", userAnalysisError);
+                    setChordAnalysisError("Failed to load saved chords due to a network error.");
+                }
+            } else if (data.analysisUrl) {
                 try {
                     const analysisResponse = await fetch(data.analysisUrl);
                     if (analysisResponse.ok) {
                         const analysisJson = await analysisResponse.json();
                         const formattedAnalysis = formatChordAnalysis(analysisJson);
                         setChordAnalysis(formattedAnalysis);
+                    } else {
+                        const errorMsg = `Failed to load AI chords (status: ${analysisResponse.status}). This may be a CORS issue on the S3 bucket.`;
+                        console.error(errorMsg, "URL:", data.analysisUrl);
+                        setChordAnalysisError(errorMsg);
                     }
                 } catch (analysisError) {
-                    console.error("Failed to load existing chord analysis:", analysisError);
+                    console.error("Network error fetching AI chord analysis:", analysisError);
+                    setChordAnalysisError("Failed to load AI-generated chords due to a network error.");
                 }
             }
 
             let bookmarksData: Bookmark[] = [];
-            const bookmarksUrl = manifestUrl.replace(/\/manifest\.json$/, '/bookmarks.json');
+            const bookmarksUrl = manifestUrl.replace(/\/manifest$/, '/bookmarks'); // Correct the endpoint path for loading bookmarks
 
-        try {
-            const bookmarksResponse = await fetch(bookmarksUrl);
+            try {
+                const bookmarksResponse = await fetch(bookmarksUrl);
                 if (bookmarksResponse.ok) {
                     const loadedData = await bookmarksResponse.json();
                     if (Array.isArray(loadedData)) {
@@ -290,7 +311,6 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
             } catch (bookmarkError) {
                 console.log("No existing bookmarks found for this project.");
             }
-
 
             const nameWithoutExt = originalFileName.replace(/\.[^/.]+$/, '');
             const cleanedName = nameWithoutExt.replace(/^\d+[\s.-]*/, '');
@@ -400,15 +420,25 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
     };
 
     const handlePlayPause = () => player.isPlaying ? player.pause() : player.play();
-    const handleAddBookmark = useCallback(() => setBookmarks(prev => [...prev, { id: Date.now(), time: player.currentTime, label: `Bookmark ${prev.length + 1}` }]), [player.currentTime]);
+    const handleAddBookmark = useCallback(() => {
+        if (player.loop) {
+            setBookmarks(prev => [...prev, {
+                id: Date.now(),
+                start: player.loop!.start,
+                end: player.loop!.end,
+                label: `Loop ${prev.length + 1}`
+            }]);
+        }
+    }, [player.loop]);
     const handleDeleteBookmark = useCallback((id: number) => setBookmarks(prev => prev.filter(b => b.id !== id)), []);
     const handleUpdateBookmarkLabel = useCallback((id: number, label: string) => setBookmarks(prev => prev.map(b => (b.id === id ? { ...b, label } : b))), []);
 
-    const handleGoToBookmark = (time: number) => {
-        if (player.isLooping) {
-            player.onLoopChange(null);
+    const handleGoToBookmark = (bookmark: Bookmark) => {
+        player.onLoopChange({ start: bookmark.start, end: bookmark.end });
+        if (!player.isLooping) {
+           player.onToggleLoop();
         }
-        player.seek(time);
+        player.seek(bookmark.start);
     };
 
     const handleSendMessage = useCallback(async (query: string) => {
@@ -438,7 +468,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
         setChordAnalysisError(null);
         setChordAnalysis(null);
         try {
-            const responseText = await analyzeChordsFromStem(currentUser, taskId, player.song.name, player.song.artist); // Changed: Pass song title and artist
+            const responseText = await analyzeChordsFromStem(currentUser, taskId, player.song.name, player.song.artist);
             setChordAnalysis(responseText);
         } catch (error: any) {
             setChordAnalysisError(error.message || "An error occurred while analyzing chords. Please try again.");
@@ -446,6 +476,22 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
             setIsChordAnalysisLoading(false);
         }
     }, [player.song, currentUser, taskId]);
+
+    const handleSaveChords = useCallback(async (newContent: string) => {
+        if (!currentUser || !taskId) {
+            setChordAnalysisError("Cannot save: user or project not identified.");
+            return;
+        }
+        setChordAnalysisError(null);
+        try {
+            await saveChordAnalysis(currentUser, taskId, newContent);
+            setChordAnalysis(newContent);
+        } catch (error) {
+            console.error(error);
+            setChordAnalysisError("Failed to save your changes. Please try again.");
+            throw error;
+        }
+    }, [currentUser, taskId]);
 
     const handleIsolationChange = (isolation: StemIsolation) => {
         setActiveIsolation(isolation);
@@ -515,7 +561,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
                             playbackSpeed={player.playbackSpeed}
                             loop={player.loop}
                             isLooping={player.isLooping}
-                            allowLoopCreation={player.isLooping} // Changed: Loop creation is now enabled only when loop mode is active.
+                            allowLoopCreation={player.isLooping}
                             onPlayPause={handlePlayPause}
                             onSeek={player.seek}
                             onSpeedChange={player.setPlaybackSpeed}
@@ -555,7 +601,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
                                 <AIAssistant song={player.song} messages={chatMessages} isLoading={isAssistantLoading} onSendMessage={handleSendMessage} />
                             </div>
                             <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'tabs' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                <ChordAnalysis song={player.song} analysisResult={chordAnalysis} isLoading={isChordAnalysisLoading} error={chordAnalysisError} onAnalyzeChords={handleAnalyzeChords} />
+                                <ChordAnalysis song={player.song} analysisResult={chordAnalysis} isLoading={isChordAnalysisLoading} error={chordAnalysisError} onAnalyzeChords={handleAnalyzeChords} onSaveChords={handleSaveChords} />
                             </div>
                              <div className={`h-full w-full absolute top-0 left-0 transition-opacity duration-200 ${activeView === 'bookmarks' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                              <BookmarkList bookmarks={bookmarks} onDeleteBookmark={handleDeleteBookmark} onUpdateBookmarkLabel={handleUpdateBookmarkLabel} onGoToBookmark={handleGoToBookmark} />

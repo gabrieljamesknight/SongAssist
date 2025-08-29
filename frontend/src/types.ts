@@ -11,7 +11,8 @@ export interface Song {
 
 export interface Bookmark {
   id: number;
-  time: number;
+  start: number;
+  end: number; 
   label: string;
 }
 

@@ -390,10 +390,12 @@ const Player: React.FC<PlayerProps> = ({
         </div>
       </div>
       
-      <button onClick={onAddBookmark} className="w-full mt-4 bg-teal-500/20 text-teal-300 hover:bg-teal-500/40 font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition">
-        <BookmarkIcon className="w-5 h-5" />
-        Add Bookmark at {formatTime(currentTime)}
-      </button>
+      {isLooping && loop && (
+        <button onClick={onAddBookmark} className="w-full mt-4 bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition">
+          <BookmarkIcon className="w-5 h-5" />
+          Save Loop ({formatTime(loop.start)} - {formatTime(loop.end)})
+        </button>
+      )}
     </div>
   );
 };

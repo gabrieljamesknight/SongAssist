@@ -5,15 +5,17 @@ from typing import Optional, Dict, Any
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is to provide the most accurate and commonly accepted chord progression for a given song, broken down by musical section.
+PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is to provide the most accurate and commonly accepted chord progression for a given song, complete with lyrics, broken down by musical section.
+
 **Analysis Process:**
 1.  **Identify the Song:** From the supplemental JSON data, determine the song's title and artist.
-2.  **Consult Knowledge Base:** Access your extensive knowledge of popular music (such as chords from websites like Ultimate Guitar Tabs) to find the standard chords for this song. Pay close attention to the order of the chords within the progression. This is your primary source of information. Attempt to find the lyrics as well where possible.
-3.  **Structure the Song:** Identify the main sections of the song (e.g., Intro, Verse, Chorus, Bridge). Use the provided audio to help verify the sequence of these sections. Align the chords with lyrics but only when you are 100% sure you have the correct lyrics.
-4.  **Format the Output:** Respond ONLY with a single JSON object with the exact structure specified below. Do not include timestamps. Only include capo details if it's relevant or the most common way of playing the song.
+2.  **Find Lyrics and Chords:** Access your extensive knowledge of popular music (such as chords from websites like Ultimate Guitar Tabs) to find the standard chords and lyrics for this song. This is your primary source of information.
+3.  **Structure the Song:** Identify the main sections of the song (e.g., Intro, Verse 1, Chorus).
+4.  **Align Chords and Lyrics:** For each section containing lyrics, place the chord name in square brackets (e.g., `[Am]`) directly before the word or syllable where the chord change occurs. For instrumental sections, provide only the chord progression.
+5.  **Format the Output:** Respond ONLY with a single JSON object with the exact structure specified below. Do not include timestamps. Only include capo details if it's relevant or the most common way of playing the song.
 
-(Ignore all chords in this output structure they are example chords only. Only use your knowledge base to draw the chords from.)
 **JSON Output Structure:**
+(The following is an example. Do not use any of these examples as knowledge for generating chords. Use your knowledge base to find the actual chords and lyrics for the requested song.)
 {
   "tuning": "E Standard (Capo 2nd Fret)",
   "key": "F# minor",
@@ -24,8 +26,12 @@ PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is
       "chords": "Em7 | G | Dsus4 | A7sus4"
     },
     {
-      "name": "Verse",
-      "chords": "Em7 | G | Dsus4 | A7sus4 | Em7 | G | Dsus4 | A7sus4"
+      "name": "Verse 1",
+      "chords": "[Em7]Today is gonna be the day that they're gonna [G]throw it back to [Dsus4]you\\n[A7sus4]By now you should've somehow [Em7]realized what you [G]gotta [Dsus4]do [A7sus4]"
+    },
+    {
+      "name": "Chorus",
+      "chords": "Because [Cadd9]maybe, [G]you're gonna be the one that [Em7]saves [G]me\\nAnd [Cadd9]after [G]all, [Em7]you're my wonder[G]wall"
     }
   ],
   "notes": "A brief analysis of the harmony, strumming patterns, or techniques observed. Mention common variations if applicable."
