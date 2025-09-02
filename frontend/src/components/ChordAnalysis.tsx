@@ -26,16 +26,6 @@ const ChordAnalysis: React.FC<ChordAnalysisProps> = ({ song, analysisResult, isL
 
   const handleAnalyzeChords = () => {
     if (!song) return;
-
-    if (analysisResult && analysisResult.trim().length > 0) {
-      const userConfirmed = window.confirm(
-        "This will replace the current chord analysis. Are you sure you want to continue?"
-      );
-      if (!userConfirmed) {
-        return;
-      }
-    }
-
     onAnalyzeChords();
   };
 
@@ -94,7 +84,7 @@ const ChordAnalysis: React.FC<ChordAnalysisProps> = ({ song, analysisResult, isL
                     disabled={isSaving}
                     className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-3 rounded-lg transition-colors text-sm disabled:opacity-50"
                 >
-                    Back {/* New: Changed button text from "Cancel" to "Back" */}
+                    Back
                 </button>
             </div>
          )}

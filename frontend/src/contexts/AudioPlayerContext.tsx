@@ -7,6 +7,7 @@ export type ExtendedAudioPlayerControls = AudioPlayerControls & {
   isLooping: boolean;
   onLoopChange: (loop: { start: number; end: number } | null) => void;
   onToggleLoop: () => void;
+  activateLoop: (loop: { start: number; end: number }) => void;
 };
 
 const AudioPlayerContext = createContext<ExtendedAudioPlayerControls | undefined>(undefined);
@@ -64,6 +65,13 @@ export const AudioPlayerProvider: FC<{children: ReactNode}> = ({ children }) => 
     }
   };
   
+  const activateLoop = (newLoop: { start: number; end: number }) => {
+    setLoop(newLoop);
+    setSavedLoop(null);
+    setIsLooping(true);
+    audioPlayer.seek(newLoop.start);
+  };
+
   const value: ExtendedAudioPlayerControls = {
     ...audioPlayer,
     loop,
@@ -71,6 +79,7 @@ export const AudioPlayerProvider: FC<{children: ReactNode}> = ({ children }) => 
     isLooping,
     onLoopChange: handleLoopChange,
     onToggleLoop: handleToggleLoop,
+    activateLoop,
     load: async (urls, details) => {
       setLoop(null);
       setSavedLoop(null);

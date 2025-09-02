@@ -13,7 +13,6 @@ import ConfirmationModal from './components/ConfirmationModal';
 import { BotIcon, FileTextIcon, BookmarkIcon, LogOutIcon } from './components/Icons';
 import { getInitialSongAnalysis, getPlayingAdvice, analyzeChordsFromStem, identifySongFromFileName, formatChordAnalysis, saveChordAnalysis } from './services/geminiService';
 
-
 const App: FC = () => {
 
     const player = useAudioPlayerContext();
@@ -33,6 +32,7 @@ const App: FC = () => {
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
     const [confirmModalState, setConfirmModalState] = useState({ isOpen: false, taskIdToDelete: null as string | null });
+    const [isChordModalOpen, setIsChordModalOpen] = useState(false); // Add state for the chord analysis confirmation modal
     const isInitialMount = useRef(true);
     const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [debouncedSongForAnalysis, setDebouncedSongForAnalysis] = useState<Song | null>(null);
@@ -434,11 +434,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
     const handleUpdateBookmarkLabel = useCallback((id: number, label: string) => setBookmarks(prev => prev.map(b => (b.id === id ? { ...b, label } : b))), []);
 
     const handleGoToBookmark = (bookmark: Bookmark) => {
-        player.onLoopChange({ start: bookmark.start, end: bookmark.end });
-        if (!player.isLooping) {
-           player.onToggleLoop();
-        }
-        player.seek(bookmark.start);
+        player.activateLoop({ start: bookmark.start, end: bookmark.end });
     };
 
     const handleSendMessage = useCallback(async (query: string) => {
@@ -462,8 +458,9 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
         }
     }, [player.song]);
 
-    const handleAnalyzeChords = useCallback(async () => {
+    const executeAnalyzeChords = useCallback(async () => {
         if (!player.song || !currentUser || !taskId) return;
+        setIsChordModalOpen(false);
         setIsChordAnalysisLoading(true);
         setChordAnalysisError(null);
         setChordAnalysis(null);
@@ -476,6 +473,15 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
             setIsChordAnalysisLoading(false);
         }
     }, [player.song, currentUser, taskId]);
+
+     const handleAnalyzeChords = useCallback(() => {
+        if (chordAnalysis) {
+            setIsChordModalOpen(true);
+        } else {
+            executeAnalyzeChords();
+        }
+    }, [chordAnalysis, executeAnalyzeChords]);
+
 
     const handleSaveChords = useCallback(async (newContent: string) => {
         if (!currentUser || !taskId) {
@@ -627,7 +633,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
 
                         {player.song && (
                              <button onClick={handleBackToProjects} className="flex items-center gap-2 bg-gray-700 hover:bg-teal-800/50 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                                <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18M3 14h18M10 3v18"/></svg>
                                 Projects
                             </button>
                         )}
@@ -652,9 +658,20 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
                 onConfirm={executeDeleteProject}
                 title="Delete Project"
                 message="Are you sure you want to permanently delete this project? This action cannot be undone."
+                confirmButtonText="Delete Project"
+                confirmButtonClassName="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+            />
+
+            <ConfirmationModal
+                isOpen={isChordModalOpen}
+                onClose={() => setIsChordModalOpen(false)}
+                onConfirm={executeAnalyzeChords}
+                title="Analyze Chords with AI"
+                message="This will use AI to analyze the guitar track and generate a chord chart. This may overwrite any manual changes. Proceed?"
+                confirmButtonText="Analyze Chords"
+                confirmButtonClassName="bg-teal-600 hover:bg-teal-700 focus:ring-teal-500"
             />
         </div>
     );
 };
-
 export default App;

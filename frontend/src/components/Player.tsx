@@ -97,7 +97,7 @@ const Player: React.FC<PlayerProps> = ({
     return percentage * song.duration;
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (!sliderContainerRef.current) return;
     const time = calculateTimeFromEvent(e);
@@ -105,26 +105,21 @@ const Player: React.FC<PlayerProps> = ({
     let dragType: 'start' | 'end' | 'new' | 'seek';
 
     if (loop) {
-      const handleWidthPixels = 12;
-      const handleWidthSeconds = (handleWidthPixels / sliderContainerRef.current.getBoundingClientRect().width) * song.duration;
       const distToStart = Math.abs(time - loop.start);
       const distToEnd = Math.abs(time - loop.end);
 
-      if (Math.min(distToStart, distToEnd) < handleWidthSeconds) {
+      // Drag the nearest handle
+      if (allowLoopCreation) {
         dragType = distToStart < distToEnd ? 'start' : 'end';
-      } else if (allowLoopCreation) {
-        dragType = 'new';
-      }
-      else {
+      } else {
         dragType = 'seek';
       }
-
     } else if (allowLoopCreation) {
       dragType = 'new';
     } else {
       dragType = 'seek';
     }
-    
+
     dragStateRef.current = { isDragging: true, initialTime: time, type: dragType, initialClientX: e.clientX };
   };
   

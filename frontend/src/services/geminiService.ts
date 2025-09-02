@@ -12,46 +12,6 @@ function requireApiBase(): string {
   return API_BASE;
 }
 
-const formatWithChordsAbove = (text: string): string => {
-  if (!text || !text.includes('[')) {
-    return text;
-  }
-
-  return text
-    .split('\n')
-    .map(line => {
-      if (!line.includes('[')) return line;
-
-      const chords: { text: string; index: number }[] = [];
-      const regex = /\[([^\]]+)\]/g;
-      let match;
-      while ((match = regex.exec(line)) !== null) {
-        chords.push({ text: match[1], index: match.index });
-      }
-
-      if (chords.length === 0) return line;
-
-      const lyricLine = line.replace(/\[[^\]]+\]/g, '');
-      const chordLineChars = Array(lyricLine.length).fill(' ');
-
-      let offset = 0;
-      chords.forEach(chord => {
-        const pos = chord.index - offset;
-        if (pos >= 0) {
-            chord.text.split('').forEach((char, i) => {
-                if (pos + i < chordLineChars.length) {
-                    chordLineChars[pos + i] = char;
-                }
-            });
-        }
-        offset += chord.text.length + 2;
-      });
-
-      return `${chordLineChars.join('').trimEnd()}\n${lyricLine}`;
-    })
-    .join('\n');
-};
-
 
 export const formatChordAnalysis = (result: any): string => {
   let formattedOutput = `### AI Analysis\n\n`;
@@ -65,7 +25,7 @@ export const formatChordAnalysis = (result: any): string => {
           if (section.name && section.chords) {
             formattedOutput += `**${section.name}**\n`;
             formattedOutput += "```\n";
-            formattedOutput += `${formatWithChordsAbove(section.chords)}\n`;
+            formattedOutput += `${section.chords}\n`;
             formattedOutput += "```\n\n";
           }
       });
@@ -174,7 +134,7 @@ export const saveChordAnalysis = async (
   const base = requireApiBase();
   const res = await fetch(`${base}/${username}/${taskId}/analysis`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'text/markdown' },
+    headers: { 'Content-Type': 'text/plain' },
     body: content,
   });
 

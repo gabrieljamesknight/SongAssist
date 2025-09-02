@@ -1,7 +1,7 @@
 import os, json, tempfile
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig, HarmCategory, HarmBlockThreshold
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -14,37 +14,80 @@ PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is
 4.  **Align Chords and Lyrics:** For each section containing lyrics, place the chord name in square brackets (e.g., `[Am]`) directly before the word or syllable where the chord change occurs. For instrumental sections, provide only the chord progression.
 5.  **Format the Output:** Respond ONLY with a single JSON object with the exact structure specified below. Do not include timestamps. Only include capo details if it's relevant or the most common way of playing the song.
 
-**JSON Output Structure:**
-(The following is an example. Do not use any of these examples as knowledge for generating chords. Use your knowledge base to find the actual chords and lyrics for the requested song.)
+**CRITICAL FORMATTING RULES:**
+1.  **Structure:** For each song section, the `chords` value must be a single string. Inside this string, chords and lyrics are paired on alternating lines. The first line is *only* for chords, the second is *only* for lyrics, the third for chords, the fourth for lyrics, and so on.
+2.  **Alignment:** You MUST use spaces to pad the chord lines. The first letter of a chord name must be directly above the first letter of the lyric syllable where that chord is played.
+3.  **Content:** Chord lines contain ONLY chord names and spaces. Lyric lines contain ONLY lyrics and punctuation.
+4.  **Newlines:** Use the `\\n` character to separate each line within the `chords` string.
+
+**JSON OUTPUT STRUCTURE (EXAMPLE - DO NOT USE THESE CHORDS, FIND THE REAL ONES):**
 {
-  "tuning": "E Standard (Capo 2nd Fret)",
-  "key": "F# minor",
-  "difficulty": 4,
+  "tuning": "E Standard",
+  "key": "G Major",
+  "difficulty": 2,
   "sections": [
     {
-      "name": "Intro",
-      "chords": "Em7 | G | Dsus4 | A7sus4"
+      "name": "Chorus",
+      "chords": "G                 D               Em7               C\\nI found a love for me\\nG                         D                       Em7               C\\nDarling, just dive right in and follow my lead"
     },
     {
       "name": "Verse 1",
-      "chords": "[Em7]Today is gonna be the day that they're gonna [G]throw it back to [Dsus4]you\\n[A7sus4]By now you should've somehow [Em7]realized what you [G]gotta [Dsus4]do [A7sus4]"
-    },
-    {
-      "name": "Chorus",
-      "chords": "Because [Cadd9]maybe, [G]you're gonna be the one that [Em7]saves [G]me\\nAnd [Cadd9]after [G]all, [Em7]you're my wonder[G]wall"
+      "chords": "G                  D                 Em7                Cadd9\\nWell, I found a girl, beautiful and sweet\\nG              D                  Em7                  Cadd9\\nOh, I never knew you were the someone waiting for me"
     }
   ],
-  "notes": "A brief analysis of the harmony, strumming patterns, or techniques observed. Mention common variations if applicable."
+  "notes": "Brief notes on strumming or technique."
 }
 """
+
+# Simple patterns to detect token-limit related errors
+TOKEN_ERROR_PATTERNS = (
+    "maximum token",
+    "max token",
+    "too many tokens",
+    "prompt is too long",
+    "input is too long",
+    "content is too long",
+    "exceeds the maximum",
+    "exceeded the maximum",
+    "exceeds limit",
+    "exceeds the limit",
+    "MAX_TOKENS",
+    "RESOURCE_EXHAUSTED",
+    "InvalidArgument: 400",
+)
+
+
+def _looks_like_token_error(err_or_msg: Union[Exception, str]) -> bool:
+    s = str(err_or_msg).lower()
+    return any(p.lower() in s for p in TOKEN_ERROR_PATTERNS)
+
+
+def _truncate(txt: Optional[str], max_len: int) -> str:
+    if not txt:
+        return ""
+    return txt[:max_len]
+
 
 def generate_text_from_prompt(system_prompt: str, user_prompt: str, model_name: str) -> Dict[str, Any]:
     model = genai.GenerativeModel(model_name)
     try:
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        resp = model.generate_content(full_prompt)
+        cfg = GenerationConfig(max_output_tokens=2048)
+        resp = model.generate_content(full_prompt, generation_config=cfg)
         return {"text": resp.text or ""}
     except Exception as e:
+        if _looks_like_token_error(e):
+            try:
+                simple_system = "You are a helpful assistant. Respond concisely."
+                simple_user = _truncate(user_prompt, 2000)
+                resp2 = model.generate_content(
+                    f"{simple_system}\n\n{simple_user}",
+                    generation_config=GenerationConfig(max_output_tokens=768),
+                )
+                return {"text": resp2.text or ""}
+            except Exception as e2:
+                print(f"Token fallback also failed: {e2}")
+                return {"error": str(e2), "error_code": "TOKEN_LIMIT", "text": "Sorry, the request was too large to process. Try shortening it."}
         print(f"Error during Gemini text generation: {e}")
         return {"error": str(e), "text": "Sorry, an error occurred while contacting the AI."}
 
@@ -75,12 +118,52 @@ def analyze_guitar_file(local_audio_path: str,
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
     }
 
-    resp = model.generate_content(parts, generation_config=config, safety_settings=safety_settings)
+    try:
+        resp = model.generate_content(parts, generation_config=config, safety_settings=safety_settings)
+    except Exception as e:
+        if _looks_like_token_error(e):
+            try:
+                # Simpler prompt and smaller output budget
+                simple_prompt = {
+                    "text": (
+                        "You are a music analysis assistant. "
+                        "Return a concise JSON with keys: tuning, key, difficulty, sections (max 2), and notes. "
+                        "Each section has name and a chords string with minimal lines."
+                    )
+                }
+                parts_simple = [simple_prompt, uploaded]
+                resp = model.generate_content(
+                    parts_simple,
+                    generation_config=GenerationConfig(max_output_tokens=2048),
+                    safety_settings=safety_settings,
+                )
+            except Exception as e2:
+                print(f"Gemini token-limit fallback failed: {e2}")
+                return {"error": "The request was too large for the model to process. Try a shorter clip or simpler request.", "error_code": "TOKEN_LIMIT"}
+        else:
+            print(f"Gemini analysis error: {e}")
+            return {"error": str(e)}
 
     if not resp.candidates or resp.candidates[0].finish_reason.name != "STOP":
         reason = resp.candidates[0].finish_reason.name if resp.candidates else "NO_RESPONSE"
-        print(f"Gemini analysis terminated with reason: {reason}")
-        return {"error": f"Analysis terminated unexpectedly. Reason: {reason}. This can be intermittent, please try again."}
+        if reason == "MAX_TOKENS":
+            try:
+                brief_prompt = {
+                    "text": (
+                        "Output a very short JSON: include at most one section and keep notes under 200 characters."
+                    )
+                }
+                resp = model.generate_content(
+                    [brief_prompt, uploaded],
+                    generation_config=GenerationConfig(max_output_tokens=1024),
+                    safety_settings=safety_settings,
+                )
+            except Exception as e3:
+                print(f"MAX_TOKENS fallback failed: {e3}")
+                return {"error": f"Analysis terminated due to output length. Please try again.", "error_code": "TOKEN_LIMIT"}
+        else:
+            print(f"Gemini analysis terminated with reason: {reason}")
+            return {"error": f"Analysis terminated unexpectedly. Reason: {reason}. This can be intermittent, please try again."}
 
     text = resp.text or ""
 

@@ -15,13 +15,19 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import shutil
 from fastapi import Query
-from gemini_client import analyze_guitar_file, generate_text_from_prompt
+try:
+    from .gemini_client import analyze_guitar_file, generate_text_from_prompt
+except ImportError:
+    from gemini_client import analyze_guitar_file, generate_text_from_prompt
 import requests
 import tempfile
 import urllib.parse
 import subprocess
 
-from stem_separation import DemucsSeparator
+try:
+    from .stem_separation import DemucsSeparator
+except ImportError: 
+    from stem_separation import DemucsSeparator
 
 
 # Hashes using bcrypt algorithm
@@ -243,7 +249,8 @@ def get_initial_analysis(req_body: AnalysisRequest):
 def get_playing_advice(req_body: AdviceRequest):
     system_prompt = """You are a helpful and encouraging guitar practice assistant. The user is asking for advice about playing a specific song.
     Use the provided context to give a clear, actionable, and encouraging response.
-    Focus on techniques, practice strategies, or music theory relevant to their question.
+    Focus on techniques, practice strategies, or music theory but only if it is relevant to their question.
+    Base the length of your response on what the question is asking.
     """
     context_parts = [f"The user is working on \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."]
     if req_body.bookmarks:
@@ -380,7 +387,7 @@ def separate_audio(
             "taskId": task_id 
         }
 
-        return JSONResponse(content=content)
+        return JSONResponse(status_code=202, content=content)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
