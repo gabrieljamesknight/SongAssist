@@ -467,6 +467,12 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
         try {
             const responseText = await analyzeChordsFromStem(currentUser, taskId, player.song.name, player.song.artist);
             setChordAnalysis(responseText);
+            try {
+                await saveChordAnalysis(currentUser, taskId, responseText);
+            } catch (e) {
+                console.error('Auto-save of generated chords failed:', e);
+                setChordAnalysisError('Generated chords were not saved automatically. You can still click Save to try again.');
+            }
         } catch (error: any) {
             setChordAnalysisError(error.message || "An error occurred while analyzing chords. Please try again.");
         } finally {
