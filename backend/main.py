@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form, Body, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -6,15 +6,29 @@ import os
 import uuid
 import json
 from dotenv import load_dotenv
-import boto3
-from passlib.context import CryptContext
-from typing import List, Optional
-from pydantic import BaseModel
-import shutil
-
-from stem_separation import DemucsSeparator
 
 load_dotenv()
+
+import boto3
+from passlib.context import CryptContext
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+import shutil
+from fastapi import Query
+try:
+    from .gemini_client import analyze_guitar_file, generate_text_from_prompt
+except ImportError:
+    from gemini_client import analyze_guitar_file, generate_text_from_prompt
+import requests
+import tempfile
+import urllib.parse
+import subprocess
+
+try:
+    from .stem_separation import DemucsSeparator
+except ImportError: 
+    from stem_separation import DemucsSeparator
+
 
 # Hashes using bcrypt algorithm
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -45,16 +59,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-separator = DemucsSeparator(model="htdemucs_6s")
+def get_separator():
+    return DemucsSeparator(s3_client=s3_client, model="htdemucs_6s")
 
 class Bookmark(BaseModel):
+    """a saved slice of audio you want to loop or revisit
+    stores start and end in seconds plus a short label
+    simple and lightweight for quick navigation
+    """
     id: int
-    time: float
+    start: float
+    end: float
     label: str
 
 class SongMetadata(BaseModel):
+    """basic info for a project display
+    song title and an optional artist name
+    used to label projects in the ui
+    """
     songTitle: str
     artist: Optional[str] = None
+
+class IdentifyRequest(BaseModel):
+    """request body for filename based song identification
+    carries the raw uploaded file name
+    the api tries to extract title and artist from it
+    """
+    rawFileName: str
+
+class AnalysisRequest(BaseModel):
+    """request body to get a friendly initial ai analysis
+    send the song title and optional artist
+    great for a short welcome and what to listen for
+    """
+    songTitle: str
+    artist: Optional[str] = None
+
+class AdviceRequest(BaseModel):
+    """request body for playing advice tailored to the song
+    optionally includes a section current isolation difficulty and bookmarks
+    the ai uses this context for focused tips
+    """
+    songTitle: str
+    artist: Optional[str] = None
+    section: Optional[str] = None
+    currentIsolation: Optional[str] = None
+    difficulty: Optional[int] = None
+    bookmarks: Optional[List[Dict[str, Any]]] = None
+
+class TabsRequest(BaseModel):
+    """request body to generate simple ascii tabs
+    provide song title and optional artist
+    focuses on one or two iconic parts not the whole song
+    """
+    songTitle: str
+    artist: Optional[str] = None
+
+class StemAnalysisRequest(BaseModel):
+    """request to analyze a separated guitar stem with ai
+    includes username and task id to locate the project
+    also carries song info and an optional free form prompt
+    """
+    username: str
+    task_id: str
+    songTitle: str
+    artist: Optional[str] = None
+    prompt: Optional[str] = ""
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -65,7 +135,7 @@ def get_password_hash(password: str) -> str:
     """Generates a bcrypt hash"""
     return pwd_context.hash(password)
 
-def upload_and_separate(temp_file_path: str, object_key: str, task_id: str, username: str, original_filename: str):
+def upload_and_separate(temp_file_path: str, object_key: str, task_id: str, username: str, original_filename: str, separator: DemucsSeparator):
     """
     Background task that first uploads the file to S3, then starts separation
     """
@@ -147,12 +217,171 @@ def login_user(username: str = Body(...), password: str = Body(...)):
 def read_root():
     return {"message": "Welcome to SongAssist API! The server is running."}
 
+@app.get("/project/{username}/{task_id}/manifest")
+def get_project_manifest(username: str, task_id: str):
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+    try:
+        manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        
+        return JSONResponse(content=manifest_data)
+        
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Manifest not yet available.")
+    except Exception as e:
+        print(f"Error fetching manifest for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not fetch project manifest.")
 
-@app.post("/separate/", summary="Separate audio stems", status_code=202)
+@app.get("/project/{username}/{task_id}/bookmarks") 
+def get_project_bookmarks(username: str, task_id: str): 
+    bookmarks_key = f"stems/{username}/{task_id}/bookmarks.json" 
+    try: 
+        bookmarks_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=bookmarks_key) 
+        bookmarks_data = json.loads(bookmarks_obj['Body'].read().decode('utf-8')) 
+        return JSONResponse(content=bookmarks_data) 
+    except s3_client.exceptions.NoSuchKey: 
+        return JSONResponse(content=[], status_code=404) 
+    except Exception as e: 
+        print(f"Error fetching bookmarks for user '{username}', task '{task_id}': {e}") 
+        raise HTTPException(status_code=500, detail="Could not fetch project bookmarks.") 
+
+@app.post("/gemini/identify-from-filename")
+def identify_song(req_body: IdentifyRequest):
+    system_prompt = """You are a music expert. Your task is to identify a song title and artist from a raw audio filename.
+    The filename might contain track numbers, garbage text, or underscores. Clean it up and provide the most likely song title and artist.
+    Respond ONLY with a JSON object in the format: {"songTitle": "...", "artist": "..."}.
+    If you cannot determine the artist, use "Unknown Artist".
+    """
+    user_prompt = f"Filename: \"{req_body.rawFileName}\""
+    response_data = generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+    try:
+        json_text = response_data.get("text", "{}")
+        if "```json" in json_text:
+            json_text = json_text.split("```json")[1].split("```")[0]
+        parsed_json = json.loads(json_text)
+        return parsed_json
+    except (json.JSONDecodeError, IndexError):
+        return {"songTitle": req_body.rawFileName, "artist": "Unknown Artist"}
+
+@app.post("/gemini/initial-analysis")
+def get_initial_analysis(req_body: AnalysisRequest):
+    system_prompt = """You are a helpful and encouraging guitar practice assistant.
+    A user has just loaded a song. Provide a brief, welcoming analysis (2-3 sentences).
+    Mention the song's key characteristics, what makes it interesting to learn on guitar, and one or two key techniques to listen for.
+    Keep it concise and positive.
+    """
+    user_prompt = f"The song is \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+
+@app.post("/gemini/playing-advice")
+def get_playing_advice(req_body: AdviceRequest):
+    system_prompt = """You are a helpful and encouraging guitar practice assistant. The user is asking for advice about playing a specific song.
+    Use the provided context to give a clear, actionable, and encouraging response.
+    Focus on techniques, practice strategies, or music theory but only if it is relevant to their question.
+    Base the length of your response on what the question is asking.
+    """
+    context_parts = [f"The user is working on \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."]
+    if req_body.bookmarks:
+        context_parts.append(f"They have set {len(req_body.bookmarks)} bookmarks.")
+    if req_body.difficulty:
+        context_parts.append(f"They perceive the difficulty as {req_body.difficulty}/10.")
+    context_parts.append(f"\nUser's question: \"{req_body.section}\"")
+    user_prompt = "\n".join(context_parts)
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+
+@app.post("/gemini/generate-tabs")
+def generate_tabs(req_body: TabsRequest):
+    system_prompt = """You are an expert guitar tab generator.
+    Your task is to create a simple, text-based (ASCII) guitar tab for the main riff or a key section of the requested song.
+    Do not tab out the entire song. Focus on one or two iconic parts.
+    Include a brief title (e.g., "Main Riff") and the tuning if it's not standard.
+    Your output should be formatted as plain text suitable for a `<pre>` tag. Use markdown for code blocks.
+    """
+    user_prompt = f"Please generate tabs for \"{req_body.songTitle}\" by {req_body.artist or 'an unknown artist'}."
+    return generate_text_from_prompt(system_prompt, user_prompt, model_name="gemini-2.5-flash")
+
+
+@app.post("/gemini/analyze-stem")
+def analyze_stem_with_gemini(req: StemAnalysisRequest):
+    manifest_key = f"stems/{req.username}/{req.task_id}/manifest.json"
+    try:
+        obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest = json.loads(obj["Body"].read().decode("utf-8"))
+    except s3_client.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail="Project manifest not found.")
+    stems = manifest.get("stems", {})
+    guitar_url = stems.get("guitar") or stems.get("Guitar")
+    if not guitar_url:
+        raise HTTPException(status_code=400, detail="Guitar stem not found in manifest.")
+    
+    local_audio_path = None
+    truncated_audio_path = None
+    try:
+        parsed_url = urllib.parse.urlparse(guitar_url)
+        file_extension = Path(parsed_url.path).suffix or ".mp3"
+        
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp:
+            local_audio_path = tmp.name
+            r = requests.get(guitar_url, timeout=60)
+            r.raise_for_status()
+            tmp.write(r.content)
+        
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as tmp_out:
+            truncated_audio_path = tmp_out.name
+
+        ffmpeg_command = [
+            "ffmpeg", "-y", "-i", local_audio_path,
+            "-t", "90", truncated_audio_path
+        ]
+        subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch or process stem: {e}")
+    
+
+    try:
+        extra_context = {"songTitle": req.songTitle, "artist": req.artist}
+        
+        result = analyze_guitar_file(
+            truncated_audio_path,
+            model_name="gemini-2.5-flash",
+            user_prompt=req.prompt,
+            extra_context_json=extra_context
+        )
+        
+        if "error" in result:
+            raise Exception(result["error"])
+
+        result_key = f"stems/{req.username}/{req.task_id}/gemini_analysis.json"
+        s3_client.put_object(
+            Bucket=BUCKET_NAME, Key=result_key,
+            Body=json.dumps(result), ContentType="application/json", ACL="public-read"
+        )
+        
+        manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+        manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        manifest_data['analysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{result_key}"
+        s3_client.put_object(
+            Bucket=BUCKET_NAME, Key=manifest_key,
+            Body=json.dumps(manifest_data), ContentType='application/json', ACL='public-read'
+        )
+        
+        return {"ok": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini analysis failed: {e}")
+    finally:
+        if local_audio_path and os.path.exists(local_audio_path):
+            os.remove(local_audio_path)
+        if truncated_audio_path and os.path.exists(truncated_audio_path):
+            os.remove(truncated_audio_path)
+
+
+@app.post("/separate/", status_code=202)
 def separate_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    username: str = Form(...)
+    username: str = Form(...),
+    separator: DemucsSeparator = Depends(get_separator)
 ):
     if not file or not username:
         raise HTTPException(status_code=400, detail="No file or username provided.")
@@ -176,7 +405,8 @@ def separate_audio(
             object_key,
             task_id,
             username,
-            original_filename
+            original_filename,
+            separator
         )
         
         content = {
@@ -184,8 +414,8 @@ def separate_audio(
             "filename": original_filename,
             "taskId": task_id 
         }
-        
-        return JSONResponse(content=content)
+
+        return JSONResponse(status_code=202, content=content)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
@@ -217,6 +447,82 @@ def save_project_bookmarks(username: str, task_id: str, bookmarks: List[Bookmark
     except Exception as e:
         print(f"Error saving bookmarks for user '{username}', task '{task_id}': {e}")
         raise HTTPException(status_code=500, detail="Could not save bookmarks.")
+
+@app.put("/{username}/{task_id}/analysis", summary="Save chord analysis", status_code=200)
+async def save_chord_analysis(username: str, task_id: str, request: Request):
+    """
+    Saves the user-edited or AI-generated formatted chord analysis as a text file
+    and updates the manifest to point to it.
+    """
+    if not username or not task_id:
+        raise HTTPException(status_code=400, detail="Username and Task ID are required.")
+
+    content = await request.body()
+    analysis_key = f"stems/{username}/{task_id}/user_analysis.md"
+    manifest_key = f"stems/{username}/{task_id}/manifest.json"
+
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=analysis_key,
+            Body=content,
+            ContentType='text/markdown',
+            ACL='public-read'
+        )
+        
+        try:
+            manifest_obj = s3_client.get_object(Bucket=BUCKET_NAME, Key=manifest_key)
+            manifest_data = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        except s3_client.exceptions.NoSuchKey:
+             raise HTTPException(status_code=404, detail="Project manifest not found to update.")
+
+        manifest_data['userAnalysisUrl'] = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{analysis_key}"
+        
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=manifest_key,
+            Body=json.dumps(manifest_data),
+            ContentType='application/json',
+            ACL='public-read'
+        )
+
+        return {"message": "Analysis saved successfully."}
+    except Exception as e:
+        print(f"Error saving analysis for user '{username}', task '{task_id}': {e}")
+        raise HTTPException(status_code=500, detail="Could not save analysis.")
+    
+@app.delete("/project/{username}/{task_id}", summary="Delete a project", status_code=200)
+def delete_project(username: str, task_id: str):
+    """
+    Deletes all files associated with a project from S3.
+    """
+    if not username or not task_id:
+        raise HTTPException(status_code=400, detail="Username and Task ID are required.")
+
+    prefix = f"stems/{username}/{task_id}/"
+    
+    try:
+        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+        
+        if 'Contents' not in response:
+            return {"message": "Project not found or already deleted."}
+
+        objects_to_delete = [{'Key': obj['Key']} for obj in response['Contents']]
+        
+        delete_response = s3_client.delete_objects(
+            Bucket=BUCKET_NAME,
+            Delete={'Objects': objects_to_delete}
+        )
+        
+        if 'Errors' in delete_response and len(delete_response['Errors']) > 0:
+            print(f"Errors deleting objects for project {task_id}: {delete_response['Errors']}")
+            raise HTTPException(status_code=500, detail="Error occurred during project deletion.")
+
+        return {"message": "Project deleted successfully."}
+
+    except Exception as e:
+        print(f"Unexpected error deleting project '{task_id}' for user '{username}': {e}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during project deletion.")
 
 
 @app.put("/{username}/{task_id}/metadata", summary="Update project metadata", status_code=200)

@@ -1,19 +1,42 @@
-import { FC, memo } from 'react';
+import { FC, memo, useRef, useEffect, useState } from 'react';
 import { Song } from '../types';
 import { PlayIcon, PauseIcon, RewindIcon, FastForwardIcon, BookmarkIcon } from './Icons';
+import JSZip from 'jszip';
 
 interface PlayerProps {
   song: Song;
   isPlaying: boolean;
   currentTime: number;
   playbackSpeed: number;
+  loop: { start: number; end: number } | null;
+  isLooping: boolean;
+  allowLoopCreation: boolean;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onSpeedChange: (speed: number) => void;
   onAddBookmark: () => void;
   onSongNameChange: (name: string) => void;
   onArtistNameChange: (artist: string) => void;
+  onLoopChange: (loop: { start: number; end: number } | null) => void;
+  onToggleLoop: () => void;
 }
+
+const LoopIcon: FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M17 2.1l4 4-4 4"/>
+    <path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8"/>
+    <path d="M7 21.9l-4-4 4-4"/>
+    <path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"/>
+  </svg>
+);
+
+const DownloadIcon: FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+);
 
 const formatTime = (seconds: number): string => {
   const minutes = Math.floor(seconds / 60);
@@ -41,14 +64,210 @@ const Player: React.FC<PlayerProps> = ({
   isPlaying,
   currentTime,
   playbackSpeed,
+  loop,
+  isLooping,
+  allowLoopCreation,
   onPlayPause,
   onSeek,
   onSpeedChange,
   onAddBookmark,
   onSongNameChange,
   onArtistNameChange,
+  onLoopChange,
+  onToggleLoop,
 }) => {
   const progress = (currentTime / song.duration) * 100;
+  const sliderContainerRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    type: 'start' | 'end' | 'new' | 'seek';
+    initialTime: number;
+    initialClientX: number;
+  } | null>(null);
+  const [isDownloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const downloadMenuRef = useRef<HTMLDivElement>(null);
+  const [isZipping, setIsZipping] = useState(false);
+
+
+  const calculateTimeFromEvent = (e: MouseEvent | React.MouseEvent): number => {
+    if (!sliderContainerRef.current) return 0;
+    const rect = sliderContainerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    return percentage * song.duration;
+  };
+
+const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!sliderContainerRef.current) return;
+    const time = calculateTimeFromEvent(e);
+
+    let dragType: 'start' | 'end' | 'new' | 'seek';
+
+    if (loop) {
+      const distToStart = Math.abs(time - loop.start);
+      const distToEnd = Math.abs(time - loop.end);
+
+      // Drag the nearest handle
+      if (allowLoopCreation) {
+        dragType = distToStart < distToEnd ? 'start' : 'end';
+      } else {
+        dragType = 'seek';
+      }
+    } else if (allowLoopCreation) {
+      dragType = 'new';
+    } else {
+      dragType = 'seek';
+    }
+
+    dragStateRef.current = { isDragging: true, initialTime: time, type: dragType, initialClientX: e.clientX };
+  };
+  
+  useEffect(() => {
+    if (!isDownloadMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
+        setDownloadMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDownloadMenuOpen]);
+
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStateRef.current?.isDragging) return;
+      const timeFromCursor = calculateTimeFromEvent(e);
+      const minLoopDuration = 2;
+
+      switch (dragStateRef.current.type) {
+        case 'new':
+          onLoopChange({ start: Math.min(dragStateRef.current.initialTime, timeFromCursor), end: Math.max(dragStateRef.current.initialTime, timeFromCursor) });
+          break;
+        case 'start':
+          if (loop) {
+            const newStart = Math.min(timeFromCursor, loop.end - minLoopDuration);
+            onLoopChange({ start: newStart, end: loop.end });
+            if (currentTime < newStart) {
+              onSeek(newStart);
+            }
+          }
+          break;
+        case 'end':
+          if (loop) {
+            const newEnd = Math.max(timeFromCursor, loop.start + minLoopDuration);
+            onLoopChange({ start: loop.start, end: newEnd });
+            if (currentTime > newEnd) {
+              onSeek(newEnd);
+            }
+          }
+          break;
+        case 'seek':
+          onSeek(timeFromCursor);
+          break;
+      }
+    };
+    
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!dragStateRef.current?.isDragging) return;
+      
+      const wasSimpleClick = Math.abs(e.clientX - dragStateRef.current.initialClientX) < 5;
+      const time = calculateTimeFromEvent(e);
+
+      if (wasSimpleClick) {
+        onSeek(time);
+      } else {
+        if (loop && loop.end - loop.start < 2) { 
+          onLoopChange(null);
+        }
+        if (dragStateRef.current.type === 'new') {
+          const finalTime = calculateTimeFromEvent(e);
+          const loopStart = Math.min(dragStateRef.current.initialTime, finalTime);
+          onSeek(loopStart);
+        }
+      }
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [loop, onLoopChange, onSeek, song.duration, currentTime]);
+  
+  const handleDownload = (stem: 'guitar' | 'backingTrack') => {
+    if (!song.stemUrls) return;
+    const url = song.stemUrls[stem];
+    const isBacking = stem === 'backingTrack';
+    const stemName = isBacking ? 'no_guitar' : 'guitar';
+
+    if (!url) return;
+    
+    const fileExtension = url.split('?')[0].split('.').pop() || 'mp3';
+    const safeSongName = song.name.replace(/[^a-z0-9_ -]/gi, '_').substring(0, 50);
+    const fileName = `${safeSongName}_${stemName}.${fileExtension}`;
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setDownloadMenuOpen(false);
+  };
+  
+  // Zips and downloads both stems
+  const handleDownloadBoth = async () => {
+    if (!song.stemUrls?.guitar || !song.stemUrls?.backingTrack) return;
+    
+    setIsZipping(true);
+    setDownloadMenuOpen(false);
+
+    try {
+      const zip = new JSZip();
+      const urlsToFetch = [
+        { key: 'guitar', url: song.stemUrls.guitar },
+        { key: 'backingTrack', url: song.stemUrls.backingTrack },
+      ];
+
+      const filePromises = urlsToFetch.map(async (fileInfo) => {
+        const response = await fetch(fileInfo.url);
+        if (!response.ok) throw new Error(`Failed to fetch ${fileInfo.key}`);
+        const blob = await response.blob();
+        
+        const stemName = fileInfo.key === 'backingTrack' ? 'no_guitar' : 'guitar';
+        const fileExtension = fileInfo.url.split('?')[0].split('.').pop() || 'mp3';
+        const safeSongName = song.name.replace(/[^a-z0-9_ -]/gi, '_').substring(0, 50);
+        const fileName = `${safeSongName}_${stemName}.${fileExtension}`;
+        
+        zip.file(fileName, blob);
+      });
+
+      await Promise.all(filePromises);
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const safeSongName = song.name.replace(/[^a-z0-9_ -]/gi, '_').substring(0, 50);
+      const zipFileName = `${safeSongName}_stems.zip`;
+
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(zipBlob);
+      link.setAttribute('download', zipFileName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+
+    } catch (error) {
+      console.error("Failed to create or download zip file:", error);
+    } finally {
+      setIsZipping(false);
+    }
+  };
 
   return (
     <div className="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
@@ -73,32 +292,71 @@ const Player: React.FC<PlayerProps> = ({
       <WaveformPlaceholder progress={progress} />
 
       <div className="relative pt-1">
-         <input
-          type="range"
-          min="0"
-          max={song.duration}
-          value={currentTime}
-          onChange={(e) => onSeek(Number(e.target.value))}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-sm"
-        />
-        <div className="flex justify-between text-xs text-gray-400 mt-1">
+        <div ref={sliderContainerRef} className="relative h-8 -my-3 group cursor-pointer" onMouseDown={handleMouseDown}>
+          <div className="absolute top-1/2 -translate-y-1/2 w-full h-2 bg-gray-700 rounded-lg transition-all duration-200 group-hover:h-3 z-0"></div>
+          
+          {loop && (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 h-2 group-hover:h-3 bg-purple-500/20 border-y-2 border-purple-500 z-20"
+              style={{
+                left: `${(loop.start / song.duration) * 100}%`,
+                width: `${((loop.end - loop.start) / song.duration) * 100}%`,
+              }}
+            >
+              <div className="absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 bg-purple-300 rounded-full border-2 border-gray-800 cursor-ew-resize transition-transform duration-200 group-hover:scale-125" />
+              <div className="absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 bg-purple-300 rounded-full border-2 border-gray-800 cursor-ew-resize transition-transform duration-200 group-hover:scale-125" />
+            </div>
+          )}
+
+          <div className="absolute top-1/2 -translate-y-1/2 h-2 bg-teal-600 rounded-lg transition-all duration-200 group-hover:h-3 z-10" style={{ width: `${progress}%` }}></div>
+          <div className="absolute top-1/2 -translate-y-1/2 w-1 h-4 bg-white rounded-full transition-transform duration-200 group-hover:scale-x-150 group-hover:scale-y-125 z-30" style={{ left: `${progress}%` }}></div>
+        </div>
+        <div className="flex justify-between text-xs text-gray-400 mt-4">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(song.duration)}</span>
         </div>
       </div>
       
-      <div className="flex items-center justify-center space-x-6">
+      <div className="flex items-center justify-center space-x-4 sm:space-x-6">
+        <button onClick={onToggleLoop} className={`p-2 rounded-full transition ${isLooping && loop ? 'bg-purple-500/30 text-purple-300' : 'text-gray-400 hover:text-white'}`} aria-label="Toggle loop">
+            <LoopIcon className="w-6 h-6" />
+        </button>
         <button onClick={() => onSeek(Math.max(0, currentTime - 10))} className="text-gray-400 hover:text-white transition"><RewindIcon className="w-6 h-6" /></button>
         <button onClick={onPlayPause} className="bg-teal-500 hover:bg-teal-600 text-white rounded-full w-16 h-16 flex items-center justify-center transition shadow-lg">
           {isPlaying ? <PauseIcon className="w-8 h-8" /> : <PlayIcon className="w-8 h-8 pl-1" />}
         </button>
         <button onClick={() => onSeek(Math.min(song.duration, currentTime + 10))} className="text-gray-400 hover:text-white transition"><FastForwardIcon className="w-6 h-6" /></button>
+        <div className="relative" ref={downloadMenuRef}>
+          <button onClick={() => setDownloadMenuOpen(!isDownloadMenuOpen)} className="p-2 rounded-full transition text-gray-400 hover:text-white" aria-label="Download stems">
+            <DownloadIcon className="w-6 h-6" />
+          </button>
+          {isDownloadMenuOpen && (
+            <div className="absolute bottom-full right-0 mb-2 w-56 bg-gray-700 rounded-lg shadow-xl py-2 z-50">
+              <button onClick={() => handleDownload('guitar')} className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600">Guitar</button>
+              <button onClick={() => handleDownload('backingTrack')} className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600">Backing Track</button>
+              <button 
+                onClick={handleDownloadBoth} 
+                className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-wait"
+                disabled={isZipping}
+              >
+                {isZipping ? 'Zipping...' : 'Both Files (.zip)'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center justify-center pt-4">
+<div className="flex items-center justify-center pt-4">
         <div className="w-full sm:w-auto flex flex-col items-center space-y-2">
             <span className="text-sm font-medium text-gray-300">Playback Speed</span>
             <div className="flex items-center space-x-3">
+                <button
+                    onClick={() => onSpeedChange(0.8)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg h-10 px-4 flex items-center justify-center transition text-sm"
+                    aria-label="Set playback speed to 0.8x"
+                >
+                    0.8x
+                </button>
                 <button
                     onClick={() => onSpeedChange(Math.max(0.5, Number((playbackSpeed - 0.1).toFixed(2))))}
                     className="bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full w-10 h-10 flex items-center justify-center transition text-xl disabled:opacity-50 disabled:cursor-not-allowed"
@@ -116,14 +374,23 @@ const Player: React.FC<PlayerProps> = ({
                 >
                     +
                 </button>
+                <button
+                    onClick={() => onSpeedChange(1.2)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg h-10 px-4 flex items-center justify-center transition text-sm"
+                    aria-label="Set playback speed to 1.2x"
+                >
+                    1.2x
+                </button>
             </div>
         </div>
       </div>
       
-      <button onClick={onAddBookmark} className="w-full mt-4 bg-teal-500/20 text-teal-300 hover:bg-teal-500/40 font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition">
-        <BookmarkIcon className="w-5 h-5" />
-        Add Bookmark at {formatTime(currentTime)}
-      </button>
+      {isLooping && loop && (
+        <button onClick={onAddBookmark} className="w-full mt-4 bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition">
+          <BookmarkIcon className="w-5 h-5" />
+          Save Loop ({formatTime(loop.start)} - {formatTime(loop.end)})
+        </button>
+      )}
     </div>
   );
 };

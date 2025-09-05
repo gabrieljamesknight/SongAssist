@@ -1,21 +1,101 @@
-import { createContext, useContext, FC, ReactNode } from 'react';
+import { createContext, useContext, FC, ReactNode, useState } from 'react';
 import { useAudioPlayer, AudioPlayerControls } from '../hooks/useAudioPlayer';
 
+export type ExtendedAudioPlayerControls = AudioPlayerControls & {
+  loop: { start: number; end: number } | null;
+  savedLoop: { start: number; end: number } | null;
+  isLooping: boolean;
+  onLoopChange: (loop: { start: number; end: number } | null) => void;
+  onToggleLoop: () => void;
+  activateLoop: (loop: { start: number; end: number }) => void;
+};
 
-const AudioPlayerContext = createContext<AudioPlayerControls | undefined>(undefined);
-
+const AudioPlayerContext = createContext<ExtendedAudioPlayerControls | undefined>(undefined);
 
 export const AudioPlayerProvider: FC<{children: ReactNode}> = ({ children }) => {
-  const audioPlayer = useAudioPlayer();
+  const [loop, setLoop] = useState<{ start: number; end: number } | null>(null);
+  const [savedLoop, setSavedLoop] = useState<{ start: number; end: number } | null>(null);
+  const [isLooping, setIsLooping] = useState<boolean>(false);
+
+  const audioPlayer = useAudioPlayer({ loop, isLooping });
+
+  const handleLoopChange = (newLoop: { start: number; end: number } | null) => {
+    setLoop(newLoop);
+    if (newLoop !== null) {
+      setSavedLoop(null);
+    }
+    if (newLoop === null) {
+      setIsLooping(false);
+    }
+  };
+
+  const handleToggleLoop = () => {
+    // If looping is currently active turn it off
+    if (isLooping) {
+        if (loop) {
+            setSavedLoop(loop);
+        }
+        setLoop(null);
+        setIsLooping(false);
+    }
+    // Otherwise turn looping on
+    else {
+        const targetLoop = savedLoop || loop;
+        if (targetLoop) {
+            setLoop(targetLoop);
+            if (savedLoop) setSavedLoop(null);
+            setIsLooping(true);
+            audioPlayer.seek(targetLoop.start);
+        }
+        // If no loop exists at all create one and activate it
+        else if (audioPlayer.song && audioPlayer.song.duration > 10) {
+            const duration = audioPlayer.song.duration;
+            const middle = duration / 2;
+            const startTime = Math.max(0, middle - 5);
+            const endTime = Math.min(duration, middle + 5);
+            const newLoop = { start: startTime, end: endTime };
+            
+            setLoop(newLoop);
+            setIsLooping(true);
+            audioPlayer.seek(startTime);
+        }
+        else {
+             setIsLooping(true);
+        }
+    }
+  };
+  
+  const activateLoop = (newLoop: { start: number; end: number }) => {
+    setLoop(newLoop);
+    setSavedLoop(null);
+    setIsLooping(true);
+    audioPlayer.seek(newLoop.start);
+  };
+
+  const value: ExtendedAudioPlayerControls = {
+    ...audioPlayer,
+    loop,
+    savedLoop,
+    isLooping,
+    onLoopChange: handleLoopChange,
+    onToggleLoop: handleToggleLoop,
+    activateLoop,
+    load: async (urls, details) => {
+      setLoop(null);
+      setSavedLoop(null);
+      setIsLooping(false);
+      await audioPlayer.load(urls, details);
+    },
+  };
+
   return (
-    <AudioPlayerContext.Provider value={audioPlayer}>
+    <AudioPlayerContext.Provider value={value}>
       {children}
     </AudioPlayerContext.Provider>
   );
 };
 
-
-export const useAudioPlayerContext = (): AudioPlayerControls => {
+export const useAudioPlayerContext = (): ExtendedAudioPlayerControls => {
   const context = useContext(AudioPlayerContext);
   if (context === undefined) {
     throw new Error('useAudioPlayerContext must be used within an AudioPlayerProvider');

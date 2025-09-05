@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      test: {
+        environment: 'node',
+        globals: true,
+        setupFiles: ['./src/test/setup.ts'],
       }
     };
 });
