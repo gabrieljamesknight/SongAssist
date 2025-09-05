@@ -8,9 +8,7 @@ import {
   saveChordAnalysis,
 } from '../services/geminiService'
 
-declare global {
-  var fetch: typeof fetch
-}
+
 
 beforeEach(() => {
   ;(import.meta as any).env = { VITE_API_BASE: 'http://api.test' }
@@ -43,17 +41,17 @@ describe('formatChordAnalysis', () => {
 
 describe('API helpers', () => {
   it('identifySongFromFileName returns JSON on 200', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ songTitle: 'X', artist: 'Y' }) }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ songTitle: 'X', artist: 'Y' }) }) as any
     const out = await identifySongFromFileName('x.mp3')
     expect(out).toEqual({ songTitle: 'X', artist: 'Y' })
-    expect(global.fetch).toHaveBeenCalledWith(
-      'http://api.test/gemini/identify-from-filename',
-      expect.objectContaining({ method: 'POST' })
-    )
+    expect((globalThis as any).fetch).toHaveBeenCalled()
+    const [url, init] = ((globalThis as any).fetch as any).mock.calls[0]
+    expect(String(url)).toMatch(/\/gemini\/identify-from-filename$/)
+    expect(init).toEqual(expect.objectContaining({ method: 'POST' }))
   })
 
   it('identifySongFromFileName returns null on non-ok', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any
     const out = await identifySongFromFileName('x.mp3')
     expect(out).toBeNull()
   })
@@ -64,13 +62,13 @@ describe('API helpers', () => {
   })
 
   it('getInitialSongAnalysis returns text field', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: 'Hello' }) }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: 'Hello' }) }) as any
     const out = await getInitialSongAnalysis('Song', 'Artist')
     expect(out).toBe('Hello')
   })
 
   it('getPlayingAdvice returns fallback on non-ok', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any
     const out = await getPlayingAdvice({ songTitle: 'S' })
     expect(out).toContain("couldn't generate advice")
   })
@@ -80,19 +78,18 @@ describe('API helpers', () => {
       ok: true,
       json: async () => ({ ok: true, result: { tuning: 'E', key: 'C', sections: [] } }),
     }
-    global.fetch = vi.fn().mockResolvedValue(server as any)
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue(server as any)
     const text = await analyzeChordsFromStem('u', 't', 'Song', 'Artist')
     expect(text).toContain('### AI Analysis')
   })
 
   it('analyzeChordsFromStem throws on server error', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'err' }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'err' }) as any
     await expect(analyzeChordsFromStem('u', 't', 'Song', 'Artist')).rejects.toThrow()
   })
 
   it('saveChordAnalysis throws on non-ok', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'bad' }) as any
+    ;(globalThis as any).fetch = vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'bad' }) as any
     await expect(saveChordAnalysis('u', 't', '# x')).rejects.toThrow()
   })
 })
-

@@ -148,7 +148,9 @@ class DemucsSeparator:
 
             manifest_content = {"stems": stem_urls, "originalFileName": original_filename}
             manifest_key = f"stems/{username}/{task_id}/manifest.json"
-            self.s3_client.put_object(Bucket=bucket_name, Key=manifest_key, Body=json.dumps(manifest_content), ContentType='application/json', ACL='public-read')
+            self.s3_client.put_object(Bucket=bucket_name, Key=manifest_key, 
+            Body=json.dumps(manifest_content), ContentType='application/json', ACL='public-read')
+            
             print(f"Created and uploaded manifest file to S3: {manifest_key}")
         except subprocess.CalledProcessError as e:
             print(f"--- DEMUCS FAILED ---\nStderr: {e.stderr}\nStdout: {e.stdout}")

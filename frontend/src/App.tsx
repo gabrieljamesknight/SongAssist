@@ -32,7 +32,7 @@ const App: FC = () => {
     const [taskId, setTaskId] = useState<string | null>(null);
     const [activeIsolation, setActiveIsolation] = useState<StemIsolation>('full');
     const [confirmModalState, setConfirmModalState] = useState({ isOpen: false, taskIdToDelete: null as string | null });
-    const [isChordModalOpen, setIsChordModalOpen] = useState(false); // Add state for the chord analysis confirmation modal
+    const [isChordModalOpen, setIsChordModalOpen] = useState(false);
     const isInitialMount = useRef(true);
     const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [debouncedSongForAnalysis, setDebouncedSongForAnalysis] = useState<Song | null>(null);
@@ -298,7 +298,7 @@ const handleLoadProject = async (manifestUrl: string, originalFileName: string) 
             }
 
             let bookmarksData: Bookmark[] = [];
-            const bookmarksUrl = manifestUrl.replace(/\/manifest$/, '/bookmarks'); // Correct the endpoint path for loading bookmarks
+            const bookmarksUrl = manifestUrl.replace(/\/manifest$/, '/bookmarks');
 
             try {
                 const bookmarksResponse = await fetch(bookmarksUrl);
