@@ -29,12 +29,12 @@ PROMPT_BASE = """You are a music analysis AI expert for guitarists. Your goal is
     {
       "name": "Chorus",
       "chords":             "G        Em"              
-      "lyrics:": "I found a love for me"
+      "lyrics:": "La la la la I love you"
     },
     {
       "name": "Verse 1",
-      "chords":                  "G                  Em"
-      "lyrics": "Well, I found a girl, beautiful and sweet"
+      "chords":    "G               D"
+      "lyrics": "I'm singing for you"
     }
   ],
   "notes": "Brief notes on strumming or technique."
