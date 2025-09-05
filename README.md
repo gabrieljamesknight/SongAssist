@@ -13,34 +13,36 @@ song to build on the insight gained from instrument isolation, potentially leadi
 Additionally, many popular applications in this field aren’t developed specifically for guitarists and therefore can   
 be a somewhat compromised experience in attempting to cater to all musicians.  
   
-SongAssist is a web application that aims to solve this problem by providing extensive stem-separation features that allow for  
-stem-splitting of any MP3 file uploaded by the user in which the user can choose to listen to just the guitar or playback of the song
-without guitar in order to play along. On top of stem-splitting, SongAssist also presents AI-assisted tips on emulating the guitar 
-playing in the song along with generation of musical notation where possible. The application aims to be accessible to any guitarist,
-even with limited technical knowledge SongAssist should be straightforward to use without any confusion.  
-  
-In order to achieve all of this functionality, the project will involve web app development, user-interface design,  
-AI-powered stem-splitting, audio file manipulation and local data storage.  
+SongAssist is an all-in-one practice web application for guitarists to learn songs in a single focused environment with minimal interruptions to workflow, this application directly addresses previous limi. The application allows users to upload an audio file of any format with which the guitar will be isolated from all other instruments and vocals, SongAssist’s user friendly interface makes it easy to quickly adjust the relative volumes of the backing track and guitar.
+
+Once the user’s file has been stem-separated, SongAssist can also provide AI-powered advice on how to play the song and is prompt-engineered to answer any of the user’s questions throughout the learning process. Chord sheets for learning the user’s song can also be AI-generated and saved within the corresponding project, if the user wishes to change the arrangement of the song or any inaccuracies are spotted in generated chords then manual changes can be made and accessed in the future.
+
+SongAssist provides the functionality for users to create loops of the section they are currently learning, these sections can then be saved and labelled. The playback speed of the loaded song can be adjusted to fit the user’s preference with straightforward UI elements for doing so. If the user wishes to download their separated stems to their local machine then this is also possible. 
   
 ________________________________________  
   
 List of requirements (objectives):   
 Essential:  
-•	Implement AI-assisted stem-splitting instrument isolation functionality.  
-•   Provide an AI assistant that gives advice on playing the song.  
-•   Develop functionality for generating guitar tablature based on the MP3 file provided.  
-•   Provide a straightforward user-interface.  
+•	Stem-Splitting Functionality  
+•   AI Musical Assistant   
+•   AI-Assisted Chord Generation 
+•   Straightforward User-Interface
   
 Desirable:   
-•	Enable users to create, edit, and manage multiple playlists of songs they are learning.  
-•	Include an interactive stem mixer.  
-•	Incorporate a feature to adjust the playback speed of the MP3 file without distorting the pitch.  
+•	Interactive Stem-Mixer 
+•	Playback Speed Control
 •	Implement a feature to add and delete bookmarks at specific timestamps within a song.   
   
 Optional:  
-•	Develop a feature to allow users to pitch shift their MP3 files without affecting playback speed.  
-•	Allow users to name or label their bookmarks for easier identification.  
-•	Implement a waveform display of the audio track to allow for more precise bookmark placement.  
-•	Develop a customizable user-interface.  
+•	Pitch Shifting
+•	Waveform Display 
+•	Customizable UI 
 
+________________________________________  
+
+AI Declaration:
+Guidance and assistance was provided by the ChatGPT Codex extension for VSCode across the whole system, 
+particularly in front-end design and testing. All AI generated code was reviewed, adapted and maintained 
+by me as developer of the project to ensure alignment with the original vision of SongAssist was carried 
+out. Architectural and system design elements were orchestrated by me with AI used as a support tool.
 
