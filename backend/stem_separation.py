@@ -24,6 +24,12 @@ INPUT_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 class DemucsSeparator:
+    """separates songs into stems with Demucs
+    holds the chosen model name and an s3 client
+    downloads input from s3 runs separation and uploads results back
+    prepares a simple manifest for the frontend to use
+    designed for long running background style work
+    """
     def __init__(self, s3_client, model: str = "htdemucs_s"):
         self.model = model
         self.s3_client = s3_client

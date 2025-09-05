@@ -37,7 +37,7 @@ export const LoginScreen: FC<LoginScreenProps> = ({ onLogin, onRegister, isLoadi
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="e.g., your-name"
+            placeholder="Username"
             className="w-full bg-gray-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition"
             autoFocus
           />

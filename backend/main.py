@@ -63,23 +63,43 @@ def get_separator():
     return DemucsSeparator(s3_client=s3_client, model="htdemucs_6s")
 
 class Bookmark(BaseModel):
+    """a saved slice of audio you want to loop or revisit
+    stores start and end in seconds plus a short label
+    simple and lightweight for quick navigation
+    """
     id: int
     start: float
     end: float
     label: str
 
 class SongMetadata(BaseModel):
+    """basic info for a project display
+    song title and an optional artist name
+    used to label projects in the ui
+    """
     songTitle: str
     artist: Optional[str] = None
 
 class IdentifyRequest(BaseModel):
+    """request body for filename based song identification
+    carries the raw uploaded file name
+    the api tries to extract title and artist from it
+    """
     rawFileName: str
 
 class AnalysisRequest(BaseModel):
+    """request body to get a friendly initial ai analysis
+    send the song title and optional artist
+    great for a short welcome and what to listen for
+    """
     songTitle: str
     artist: Optional[str] = None
 
 class AdviceRequest(BaseModel):
+    """request body for playing advice tailored to the song
+    optionally includes a section current isolation difficulty and bookmarks
+    the ai uses this context for focused tips
+    """
     songTitle: str
     artist: Optional[str] = None
     section: Optional[str] = None
@@ -88,10 +108,18 @@ class AdviceRequest(BaseModel):
     bookmarks: Optional[List[Dict[str, Any]]] = None
 
 class TabsRequest(BaseModel):
+    """request body to generate simple ascii tabs
+    provide song title and optional artist
+    focuses on one or two iconic parts not the whole song
+    """
     songTitle: str
     artist: Optional[str] = None
 
 class StemAnalysisRequest(BaseModel):
+    """request to analyze a separated guitar stem with ai
+    includes username and task id to locate the project
+    also carries song info and an optional free form prompt
+    """
     username: str
     task_id: str
     songTitle: str
