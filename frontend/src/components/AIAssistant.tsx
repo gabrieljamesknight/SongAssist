@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { ChatMessage, Song } from '../types';
 import { MarkdownText } from './MarkdownRenderer';
 import { SparklesIcon } from './Icons';
@@ -12,6 +12,16 @@ interface AIAssistantProps {
 
 export const AIAssistant: React.FC<AIAssistantProps> = ({ song, messages, isLoading, onSendMessage }) => {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [quickPrompts, setQuickPrompts] = useState<{ label: string; prompt: string }[]>([
+    {
+      label: 'How do I replicate the technique?',
+      prompt: 'How can I replicate the technique used in this song?'
+    },
+    {
+      label: 'How should I approach learning this?',
+      prompt: 'How should I approach learning this?'
+    }
+  ]);
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -22,6 +32,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ song, messages, isLoad
   const handleQuickQuestion = (question: string) => {
     if (!isLoading) {
       onSendMessage(question);
+      setQuickPrompts((prev) => prev.filter((qp) => qp.prompt !== question));
     }
   };
 
@@ -71,20 +82,16 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({ song, messages, isLoad
       </div>
 
       <div className="flex-shrink-0 mt-4 space-y-2">
-        <button
-          onClick={() => handleQuickQuestion('How can I replicate the technique used in this song?')}
-          disabled={isLoading}
-          className="w-full bg-gray-700 hover:bg-teal-800/60 text-sm text-white py-2 px-3 rounded-lg transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
-        >
-          How do I replicate the technique?
-        </button>
-        <button
-          onClick={() => handleQuickQuestion('How should I approach learning this?')}
-          disabled={isLoading}
-          className="w-full bg-gray-700 hover:bg-teal-800/60 text-sm text-white py-2 px-3 rounded-lg transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
-        >
-          How should I approach learning this?
-        </button>
+        {quickPrompts.map(({ label, prompt }) => (
+          <button
+            key={prompt}
+            onClick={() => handleQuickQuestion(prompt)}
+            disabled={isLoading}
+            className="w-full bg-gray-700 hover:bg-teal-800/60 text-sm text-white py-2 px-3 rounded-lg transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
+          >
+            {label}
+          </button>
+        ))}
       </div>
       
       <form onSubmit={handleFormSubmit} className="mt-4 flex flex-shrink-0">

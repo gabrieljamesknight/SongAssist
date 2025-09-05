@@ -38,10 +38,9 @@ export const MarkdownText: React.FC<{ text: string }> = ({ text }) => {
     }
 
     if (inCodeBlock) {
-      // comment: If inside a code block, collect the line.
       codeBlockContent.push(line);
     } else {
-      // comment: If not in a code block, parse for headings or regular text.
+      // If not in a code block, parse for headings or regular text.
       const headingMatch = line.match(/^(#{1,6})\s(.*)/);
       if (headingMatch) {
         const content = headingMatch[2];
