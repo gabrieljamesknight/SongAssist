@@ -33,11 +33,8 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Refs for the Audio API nodes
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const sourcesRef = useRef<Record<Stem, AudioBufferSourceNode | null>>({ guitar: null, backingTrack: null });
-    const gainsRef = useRef<Record<Stem, GainNode | null>>({ guitar: null, backingTrack: null });
-    const buffersRef = useRef<Record<Stem, AudioBuffer | null>>({ guitar: null, backingTrack: null });
+    // Refs for HTML audio elements (used to preserve pitch while changing speed)
+    const audioElsRef = useRef<Record<Stem, HTMLAudioElement | null>>({ guitar: null, backingTrack: null });
     
     // Ref to hold playback state, used to stabilize callback functions
     const playbackStateRef = useRef({
@@ -54,83 +51,79 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
     }, [isPlaying, playbackSpeed]);
 
     const stopPlayback = useCallback(() => {
-        Object.values(sourcesRef.current).forEach(source => {
-            if (source) {
-                source.onended = null;
-                try { source.stop(); } catch (e) { /* ignore */ }
-            }
-        });
-        sourcesRef.current = { guitar: null, backingTrack: null };
+        const { guitar, backingTrack } = audioElsRef.current;
+        try { guitar?.pause(); } catch {}
+        try { backingTrack?.pause(); } catch {}
     }, []);
 
-    const initAudioContext = useCallback(() => {
-        if (audioContextRef.current) return audioContextRef.current;
-        try {
-            const context = new (window.AudioContext || (window as any).webkitAudioContext)();
-            audioContextRef.current = context;
-            
-            const guitarGain = context.createGain();
-            guitarGain.connect(context.destination);
-            gainsRef.current.guitar = guitarGain;
-
-            const backingGain = context.createGain();
-            backingGain.connect(context.destination);
-            gainsRef.current.backingTrack = backingGain;
-            
-            return context;
-        } catch (e) {
-            setError("Web Audio API is not supported by this browser.");
-            return null;
-        }
+    const ensureAudioElements = useCallback(() => {
+        (['guitar', 'backingTrack'] as Stem[]).forEach((stem) => {
+            if (!audioElsRef.current[stem]) {
+                const el = new Audio();
+                // Try to preserve pitch across browsers
+                try { (el as any).preservesPitch = true; } catch {}
+                try { (el as any).mozPreservesPitch = true; } catch {}
+                try { (el as any).webkitPreservesPitch = true; } catch {}
+                el.preload = 'auto';
+                el.crossOrigin = 'anonymous';
+                audioElsRef.current[stem] = el;
+            }
+        });
+        return audioElsRef.current;
     }, []);
 
     const play = useCallback(async () => {
-        const context = initAudioContext();
-        if (!context || !buffersRef.current.guitar || !buffersRef.current.backingTrack) return;
-        
-        if (context.state === 'suspended') await context.resume();
-        
+        ensureAudioElements();
+        const { guitar, backingTrack } = audioElsRef.current;
+        if (!guitar || !backingTrack) return;
+
+        // Stop any existing playback first
         stopPlayback();
 
-        const createAndStartSource = (buffer: AudioBuffer, gainNode: GainNode): AudioBufferSourceNode => {
-            const source = context.createBufferSource();
-            source.buffer = buffer;
-            source.playbackRate.value = playbackStateRef.current.currentSpeed;
-            source.connect(gainNode);
-            source.start(0, Math.max(0, playbackStateRef.current.pausedAt));
-            return source;
-        };
+        // Sync position and speed
+        const targetTime = Math.max(0, playbackStateRef.current.pausedAt);
+        try { guitar.currentTime = targetTime; } catch {}
+        try { backingTrack.currentTime = targetTime; } catch {}
 
-        sourcesRef.current.guitar = createAndStartSource(buffersRef.current.guitar, gainsRef.current.guitar!);
-        sourcesRef.current.backingTrack = createAndStartSource(buffersRef.current.backingTrack, gainsRef.current.backingTrack!);
+        [guitar, backingTrack].forEach((el) => {
+            el.playbackRate = playbackStateRef.current.currentSpeed;
+            try { (el as any).preservesPitch = true; } catch {}
+            try { (el as any).mozPreservesPitch = true; } catch {}
+            try { (el as any).webkitPreservesPitch = true; } catch {}
+        });
 
-        sourcesRef.current.guitar.onended = () => {
-            if (playbackStateRef.current.isPlaying) {
-                setIsPlaying(false);
-                setCurrentTime(0);
-                playbackStateRef.current.pausedAt = 0;
-            }
-        };
+        // Apply current volumes
+        guitar.volume = stemVolumes.guitar / 100;
+        backingTrack.volume = stemVolumes.backingTrack / 100;
 
-        playbackStateRef.current.startedAt = context.currentTime;
+        // Start playback, ignore promise errors in test/jsdom
+        try { await guitar.play(); } catch {}
+        try { await backingTrack.play(); } catch {}
+
+        // Mark playing and set start time for UI timing
+        playbackStateRef.current.startedAt = performance.now() / 1000;
         setIsPlaying(true);
-    }, [initAudioContext, stopPlayback]);
+    }, [ensureAudioElements, stopPlayback, stemVolumes.guitar, stemVolumes.backingTrack]);
 
     const pause = useCallback(() => {
-        const context = audioContextRef.current;
-        if (!context || !playbackStateRef.current.isPlaying) return;
-
-        const elapsedSinceStart = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
-        playbackStateRef.current.pausedAt += elapsedSinceStart;
-        
-        stopPlayback();
+        if (!playbackStateRef.current.isPlaying) return;
+        const { guitar, backingTrack } = audioElsRef.current;
+        try { guitar?.pause(); } catch {}
+        try { backingTrack?.pause(); } catch {}
+        const t = guitar ? guitar.currentTime : (backingTrack ? backingTrack.currentTime : 0);
+        playbackStateRef.current.pausedAt = t || 0;
+        setCurrentTime(playbackStateRef.current.pausedAt);
         setIsPlaying(false);
-    }, [stopPlayback]);
+    }, []);
 
     const seek = useCallback((time: number) => {
         if (!song) return;
         const newTime = Math.max(0, Math.min(time, song.duration));
-        
+
+        const { guitar, backingTrack } = audioElsRef.current;
+        if (guitar) { try { guitar.currentTime = newTime; } catch {} }
+        if (backingTrack) { try { backingTrack.currentTime = newTime; } catch {} }
+
         playbackStateRef.current.pausedAt = newTime;
         setCurrentTime(newTime);
 
@@ -141,23 +134,19 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
     }, [song, play]);
 
     const setPlaybackSpeed = useCallback((speed: number | ((prevSpeed: number) => number)) => {
-        const context = audioContextRef.current;
         const newSpeed = typeof speed === 'function' ? speed(playbackStateRef.current.currentSpeed) : speed;
 
-        if (playbackStateRef.current.isPlaying && context) {
-            const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
-            playbackStateRef.current.pausedAt += elapsed;
-            playbackStateRef.current.startedAt = context.currentTime;
-        }
-
-        Object.values(sourcesRef.current).forEach(source => {
-            if (source) {
-                source.playbackRate.value = newSpeed;
+        const { guitar, backingTrack } = audioElsRef.current;
+        [guitar, backingTrack].forEach((el) => {
+            if (el) {
+                el.playbackRate = newSpeed;
+                try { (el as any).preservesPitch = true; } catch {}
+                try { (el as any).mozPreservesPitch = true; } catch {}
+                try { (el as any).webkitPreservesPitch = true; } catch {}
             }
         });
 
         setPlaybackSpeedState(newSpeed);
-
     }, []);
 
     const load = useCallback(async (stemUrls: Record<string, string>, songDetails: { name: string, artist: string }) => {
@@ -173,18 +162,33 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
 
         const decodingContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         try {
-            initAudioContext();
+            ensureAudioElements();
             const [guitarRes, backingRes] = await Promise.all([fetch(stemUrls.guitar), fetch(stemUrls.backingTrack)]);
             if (!guitarRes.ok || !backingRes.ok) throw new Error("Failed to fetch audio files.");
 
             const [guitarArrayBuffer, backingArrayBuffer] = await Promise.all([guitarRes.arrayBuffer(), backingRes.arrayBuffer()]);
-            const [decodedGuitar, decodedBacking] = await Promise.all([
+            const [decodedGuitar] = await Promise.all([
                 decodingContext.decodeAudioData(guitarArrayBuffer),
-                decodingContext.decodeAudioData(backingArrayBuffer)
             ]);
 
-            buffersRef.current.guitar = decodedGuitar;
-            buffersRef.current.backingTrack = decodedBacking;
+            // Wire up HTML audio elements
+            const { guitar, backingTrack } = audioElsRef.current;
+            if (guitar) {
+                guitar.src = stemUrls.guitar;
+                guitar.playbackRate = 1;
+                guitar.volume = stemVolumes.guitar / 100;
+                try { (guitar as any).preservesPitch = true; } catch {}
+                try { (guitar as any).mozPreservesPitch = true; } catch {}
+                try { (guitar as any).webkitPreservesPitch = true; } catch {}
+            }
+            if (backingTrack) {
+                backingTrack.src = stemUrls.backingTrack;
+                backingTrack.playbackRate = 1;
+                backingTrack.volume = stemVolumes.backingTrack / 100;
+                try { (backingTrack as any).preservesPitch = true; } catch {}
+                try { (backingTrack as any).mozPreservesPitch = true; } catch {}
+                try { (backingTrack as any).webkitPreservesPitch = true; } catch {}
+            }
             
             setSong({ 
                 ...songDetails, 
@@ -200,35 +204,28 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
             setIsLoading(false);
             decodingContext.close();
         }
-    }, [pause, initAudioContext]);
+    }, [pause, ensureAudioElements, stemVolumes.guitar, stemVolumes.backingTrack]);
 
     // Effect for updating stem volumes
     useEffect(() => {
-        const context = audioContextRef.current;
-        const guitarGain = gainsRef.current.guitar;
-        const backingGain = gainsRef.current.backingTrack;
-
-        if (context && context.state === 'running' && guitarGain && backingGain) {
-            guitarGain.gain.setTargetAtTime(stemVolumes.guitar / 100, context.currentTime, 0.01);
-            backingGain.gain.setTargetAtTime(stemVolumes.backingTrack / 100, context.currentTime, 0.01);
-        }
+        const { guitar, backingTrack } = audioElsRef.current;
+        if (guitar) guitar.volume = Math.max(0, Math.min(1, stemVolumes.guitar / 100));
+        if (backingTrack) backingTrack.volume = Math.max(0, Math.min(1, stemVolumes.backingTrack / 100));
     }, [stemVolumes]);
 
-    // Effect for updating the UI timer
+    // Effect for updating the UI timer using media element time
     useEffect(() => {
         let animationFrameId: number;
         const update = () => {
-            const context = audioContextRef.current;
-            if (playbackStateRef.current.isPlaying && context && song?.duration) {
-                // Time elapsed since last play/seek/speed-change, adjusted for current speed
-                const elapsed = (context.currentTime - playbackStateRef.current.startedAt) * playbackStateRef.current.currentSpeed;
-                // Total time is the time before this segment + time elapsed in this segment
-                const newCurrentTime = playbackStateRef.current.pausedAt + elapsed;
-                
+            if (playbackStateRef.current.isPlaying && song?.duration) {
+                const t = audioElsRef.current.guitar?.currentTime ?? audioElsRef.current.backingTrack?.currentTime ?? 0;
+                const newCurrentTime = Math.max(0, Math.min(t, song.duration));
+
                 if (isLooping && loop && newCurrentTime >= loop.end) {
                     seek(loop.start);
                 } else if (newCurrentTime < song.duration) {
                     setCurrentTime(newCurrentTime);
+                    playbackStateRef.current.pausedAt = newCurrentTime;
                 } else {
                     // Song finished
                     setCurrentTime(song.duration);
@@ -243,7 +240,7 @@ export const useAudioPlayer = (options: AudioPlayerOptions): AudioPlayerControls
         if (isPlaying) {
             animationFrameId = requestAnimationFrame(update);
         }
-        
+
         return () => cancelAnimationFrame(animationFrameId);
     }, [isPlaying, song?.duration, stopPlayback, loop, isLooping, seek]);
 
