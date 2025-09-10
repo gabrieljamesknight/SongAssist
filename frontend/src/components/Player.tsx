@@ -136,7 +136,7 @@ const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     };
   }, [isDownloadMenuOpen]);
 
-
+  // Effect
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragStateRef.current?.isDragging) return;

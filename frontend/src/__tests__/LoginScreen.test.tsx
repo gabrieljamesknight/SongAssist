@@ -9,7 +9,7 @@ describe('LoginScreen', () => {
     const onRegister = vi.fn()
     render(<LoginScreen onLogin={onLogin} onRegister={onRegister} isLoading={false} />)
 
-    fireEvent.change(screen.getByPlaceholderText('e.g., your-name'), { target: { value: ' user ' } })
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: ' user ' } })
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: ' pass ' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Login' }))
 
@@ -25,7 +25,7 @@ describe('LoginScreen', () => {
     fireEvent.click(screen.getByText("Don't have an account? Register"))
     expect(screen.getByText('Create an Account')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByPlaceholderText('e.g., your-name'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'alice' } })
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Register' }))
     expect(onRegister).toHaveBeenCalledWith('alice', 'secret')

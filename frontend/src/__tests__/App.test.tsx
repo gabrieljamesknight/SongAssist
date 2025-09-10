@@ -53,7 +53,7 @@ describe('App (smoke)', () => {
 
     expect(screen.getByText('Welcome to SongAssist')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByPlaceholderText('e.g., your-name'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByPlaceholderText('Username'), { target: { value: 'alice' } })
     fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Login' }))
 
